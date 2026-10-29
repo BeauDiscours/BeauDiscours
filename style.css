@@ -286,3 +286,96 @@ section[data-section] .deux:last-child { margin-bottom: 0; }
 .photo-cadre figcaption a { color: var(--encre-3); }
 .pied { max-width: 1180px; margin: 10px auto 30px; padding: 16px 24px; border-top: 1px solid var(--bord); display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; }
 .pied #publie { margin-left: auto; }
+
+/* =================================================================
+   Direction artistique « La tribune » : scène sombre, un projecteur
+   dont la couleur change avec l'onglet (body[data-onglet]).
+   ================================================================= */
+@font-face {
+  font-family: 'Inter'; src: url(fonts/inter-latin.woff2) format('woff2');
+  font-weight: 100 900; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter'; src: url(fonts/inter-latin-ext.woff2) format('woff2');
+  font-weight: 100 900; font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+:root {
+  --fond: #0e0e10;
+  --surface: #161619;
+  --surface-2: #202025;
+  --bord: #2b2b31;
+  --encre: #f2efe8;
+  --encre-2: #c9c4b8;
+  --encre-3: #8f8a80;
+  --v-vrai: #4a94d8;
+  --v-trompeur: #b38d2c;
+  --v-faux: #d2456e;
+  --v-inverifiable: #8a8a8a;
+  --t-fait: #1f9e8f;
+  --t-opinion: #a07ad4;
+  --t-autre: #8a8a8a;
+  --scene: #ffd23f;
+  --accent: var(--scene);
+  --ombre: none;
+  color-scheme: dark;
+}
+body[data-onglet="accueil"] { --scene: #ffd23f; }
+body[data-onglet="affirmations"] { --scene: #ff6b5b; }
+body[data-onglet="personnalites"] { --scene: #5cc8ff; }
+body[data-onglet="partis"] { --scene: #c49bff; }
+body[data-onglet="methode"] { --scene: #6be3a9; }
+body[data-onglet="atelier"] { --scene: #ff9f43; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--fond);
+  background-image: radial-gradient(ellipse 70% 55% at 22% -8%, color-mix(in srgb, var(--scene) 16%, transparent) 0%, transparent 70%);
+  background-repeat: no-repeat;
+  transition: background-color .3s;
+}
+h1, h2, h3 { font-weight: 800; letter-spacing: -.02em; }
+h1 { font-size: 30px; }
+a { color: var(--scene); }
+
+/* Barre du haut */
+.barre { background: color-mix(in srgb, var(--fond) 88%, transparent); backdrop-filter: blur(8px); border-bottom-color: var(--bord); }
+.logo { font-weight: 800; letter-spacing: .06em; text-transform: uppercase; font-size: 16px; }
+.logo::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--scene); margin-right: 9px; vertical-align: 1px; box-shadow: 0 0 14px var(--scene); }
+.barre nav a { color: var(--encre-3); }
+.barre nav a:hover { background: none; color: var(--encre); }
+.barre nav a.actif { background: none; color: var(--scene); }
+.pastille { background: var(--scene); color: #0e0e10; }
+.atelier.actif { border-color: var(--scene); color: var(--scene); background: none; }
+
+/* Commandes */
+button.principal, a.bouton.principal { background: var(--scene); border-color: var(--scene); color: #0e0e10; font-weight: 650; }
+.segments { border-color: var(--bord); }
+.segments button, .segments a { background: var(--surface); color: var(--encre-2); }
+.segments button.actif, .segments a.actif { background: var(--scene); color: #0e0e10; }
+.onglets-page button.actif, .onglets-page a.actif { border-bottom-color: var(--scene); color: var(--encre); }
+input, select, textarea { background: var(--surface); border-color: var(--bord); }
+
+/* Cartes et chiffres */
+.carte, .choc-tuile, .indicateur { background: var(--surface); border-color: var(--bord); }
+.chiffre b, .indicateur b { letter-spacing: -.02em; }
+.barre-ligne .piste i { background: var(--scene); }
+tr.clic:hover td, .ligne-p:hover, .ligne-aff:hover { background: var(--surface-2); }
+
+/* Accueil : le projecteur */
+.hero { padding: 44px 4px 30px; }
+.hero-chiffre { color: var(--scene); font-weight: 900; letter-spacing: -.05em; font-size: clamp(72px, 15vw, 150px);
+  text-shadow: 0 0 60px color-mix(in srgb, var(--scene) 35%, transparent); }
+.hero-texte { font-size: clamp(19px, 2.6vw, 26px); font-weight: 500; }
+.hero-texte b { color: var(--encre); font-weight: 800; }
+.choc-tuile { border-radius: 16px; }
+.choc-tuile b { font-weight: 900; letter-spacing: -.03em; }
+.choc-tuile:first-child b { color: var(--scene); }
+.affirmation .citation, .ligne-aff .citation { color: var(--encre); }
+/* Couleurs de parti sombres (RN, Reconquête…) : un liseré clair les garde visibles sur la scène. */
+.badge i, .legende i, .ligne-p .ini { box-shadow: 0 0 0 1.5px rgba(242, 239, 232, .45); }
+.parti .liseré { box-shadow: 1px 0 0 rgba(242, 239, 232, .25); }
+/* Filtres : ne débordent jamais de l'écran sur mobile. */
+.segments { flex-wrap: wrap; max-width: 100%; }
+.entete .filtres { min-width: 0; max-width: 100%; }

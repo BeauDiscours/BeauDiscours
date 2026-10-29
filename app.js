@@ -321,6 +321,7 @@ function route() {
   const vue = VUES[parts[0]] && !(STATIQUE && parts[0] === 'atelier') ? parts[0] : 'accueil';
   S.requete = new URLSearchParams(requete || '');
   document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('actif', a.dataset.nav === NAV[vue]));
+  document.body.dataset.onglet = NAV[vue];
   const v = $('#vue');
   if (!S.d) { v.innerHTML = '<p class="vide-etat">Chargement…</p>'; return; }
   VUES[vue](v, parts[1] || '', parts[2] || '');
