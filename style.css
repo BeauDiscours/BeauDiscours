@@ -313,6 +313,7 @@ section[data-section] .deux:last-child { margin-bottom: 0; }
   --v-trompeur: #b38d2c;
   --v-faux: #d2456e;
   --v-inverifiable: #8a8a8a;
+  --v-non-etaye: #8a6fd6;
   --t-fait: #1f9e8f;
   --t-opinion: #a07ad4;
   --t-autre: #8a8a8a;
@@ -385,3 +386,8 @@ tr.clic:hover td, .ligne-p:hover, .ligne-aff:hover { background: var(--surface-2
 .nuage .mot.fort { color: var(--scene); }
 .nuage .mot.faible { color: var(--encre-3); font-weight: 600; }
 .nuage .mot:hover { color: var(--encre); }
+
+/* Vérification des faits (Atelier) */
+.verif mark { background: color-mix(in srgb, var(--scene) 30%, transparent); color: var(--encre); }
+.piste-source { padding: 6px 0; border-bottom: 1px dashed var(--bord); }
+.choix-verdict button[data-verdict] { border-width: 1px; }
