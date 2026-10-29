@@ -206,7 +206,7 @@ function blocPortee(ids, seul) {
     ${seul ? '' : `<h4>Comptes les plus suivis</h4>${barres(a.pers.slice(0, 5).map(([id, n]) => ({ nom: S.pers[id].nom, val: n, label: nbCourt(n) })), a.pers[0][1])}`}
     <p class="mention">${seul ? '' : 'Somme des abonnés des membres : une même personne peut suivre plusieurs comptes. '}Bluesky, Mastodon, Telegram : relevés du jour. X et YouTube : derniers chiffres connus de Wikidata${a.plusAncien ? ` (le plus ancien date de ${fdate(a.plusAncien.slice(0, 7))})` : ''}, YouTube à jour si une clé Google est enregistrée.</p>`;
 }
-// Répétitions confirmées : [personne, affirmation, date, source, après démenti, parti]
+// Répétitions confirmées : [personne, affirmation, date, source, maintenue malgré le démenti, parti]
 function faussetesDe(filtre) {
   const lignes = S.d.faussetes.filter(l => dansPeriode(l[2]) && filtre(l));
   const parAff = {};
@@ -221,12 +221,12 @@ function blocFaussetes(fx, avecPersonnes) {
   return `<div class="chiffres" style="margin:10px 0">
       <div class="chiffre"><b>${fx.affirmations.length}</b><span>affirmation${fx.affirmations.length > 1 ? 's' : ''} mensongère${fx.affirmations.length > 1 ? 's' : ''}</span></div>
       <div class="chiffre"><b>${fx.n}</b><span>répétition${fx.n > 1 ? 's' : ''}</span></div>
-      <div class="chiffre"><b>${fx.apres}</b><span>après démenti</span></div>
+      <div class="chiffre"><b>${fx.apres}</b><span>maintenues malgré le démenti</span></div>
     </div>
     ${fx.affirmations.slice(0, 8).map(([aid, x]) => `<div class="verdict">
       <div><span class="etiquette" style="background:var(--v-faux)">${x.n} fois</span></div>
       <div><a href="#/affirmation/${aid}" class="citation">${esc(S.d.registre_noms[aid] || aid)}</a>
-        <div class="source">${x.apres ? `dont ${x.apres} après démenti` : 'avant démenti'}${avecPersonnes ? ` · ${x.personnes.size} personnalité${x.personnes.size > 1 ? 's' : ''}` : ''}</div></div><span></span>
+        <div class="source">${x.apres ? `dont ${x.apres} maintenue${x.apres > 1 ? 's' : ''} malgré le démenti` : 'corrigée ou antérieure au démenti'}${avecPersonnes ? ` · ${x.personnes.size} personnalité${x.personnes.size > 1 ? 's' : ''}` : ''}</div></div><span></span>
     </div>`).join('')}`;
 }
 
@@ -241,14 +241,24 @@ function barres(items, max) {
   return `<div class="barres">${items.map(it => `<div class="barre-ligne" data-tip="${esc(it.tip || '')}">
     <span class="lib">${esc(it.nom)}</span><span class="piste"><i style="width:${Math.max(2, 100 * it.val / max)}%"></i></span><span class="val">${esc(it.label)}</span></div>`).join('')}</div>`;
 }
-function blocThemes(ids, n = 8) {
-  const th = themesDe(ids).slice(0, n);
-  if (!th.length) return '<p class="muet">Pas encore de thème repéré.</p>';
-  const tot = themesDe(ids).reduce((s, [, x]) => s + x.total, 0);
-  return barres(th.map(([k, x]) => ({
-    nom: S.d.theme_noms[k] || k, val: x.total, label: pct(x.total, tot) + ' %',
-    tip: `<b>${esc(S.d.theme_noms[k] || k)}</b><br>Séance : ${x.seance}<br>Réseaux : ${x.reseaux}<br>Presse : ${x.presse}`,
-  })), th[0][1].total) + '<p class="mention">Part des mentions de thèmes, toutes périodes (séance, réseaux, titres de presse).</p>';
+// Nuage des thèmes : taille selon la part des mentions, pourcentage et détail au survol.
+function blocThemes(ids, n = 21) {
+  const tous = themesDe(ids);
+  if (!tous.length) return '<p class="muet">Pas encore de thème repéré.</p>';
+  const tot = tous.reduce((s, [, x]) => s + x.total, 0);
+  const th = tous.slice(0, n), max = th[0][1].total;
+  // Les plus grands au centre : on place alternativement à gauche et à droite.
+  const ordre = [];
+  th.forEach((t, i) => (i % 2 ? ordre.push(t) : ordre.unshift(t)));
+  return `<div class="nuage">${ordre.map(([k, x]) => {
+    const rang = th.findIndex(t => t[0] === k);
+    const taille = Math.round(14 + 28 * Math.sqrt(x.total / max));
+    const nom = S.d.theme_noms[k] || k;
+    const court = nom.split(',')[0];  // « Budget, impôts, dette » → « Budget » ; le nom complet au survol
+    const tip = `<b>${esc(nom)}</b> · ${pct(x.total, tot)} % des mentions<br>Séance ${x.seance} · Réseaux ${x.reseaux} · Presse ${x.presse}`;
+    return `<span class="mot${rang < 3 ? ' fort' : rang > 9 ? ' faible' : ''}" style="font-size:${taille}px" data-tip="${esc(tip)}">${esc(court)}</span>`;
+  }).join('')}</div>
+  <p class="mention">Taille selon la part des mentions (séance, réseaux, titres de presse), toutes périodes. Survoler un thème pour le détail.</p>`;
 }
 function blocMedias(ids) {
   const md = mediasDe(ids), pr = presseDe(ids);
@@ -415,7 +425,7 @@ function carteParti({ p, membres, c, f, md, pr, ab, fx }) {
       <div class="chiffre"><b>${ab ? nbCourt(ab) : '–'}</b><span>abonnés cumulés</span></div>
     </div>
     <div class="ligne-barre"><span>Verdicts</span><div class="${peu ? 'insuffisant' : ''}">${empile(c, VERDICTS, c.n, 'propos vérifiés')}</div></div>
-    ${fx.n ? `<div class="mention" style="color:var(--v-faux)">${fx.affirmations.length} affirmation${fx.affirmations.length > 1 ? 's' : ''} mensongère${fx.affirmations.length > 1 ? 's' : ''} répétée${fx.affirmations.length > 1 ? 's' : ''} ${fx.n} fois${fx.apres ? `, dont ${fx.apres} après démenti` : ''}</div>` : ''}
+    ${fx.n ? `<div class="mention" style="color:var(--v-faux)">${fx.affirmations.length} affirmation${fx.affirmations.length > 1 ? 's' : ''} mensongère${fx.affirmations.length > 1 ? 's' : ''} répétée${fx.affirmations.length > 1 ? 's' : ''} ${fx.n} fois${fx.apres ? `, dont ${fx.apres} malgré le démenti` : ''}</div>` : ''}
     <div class="mention">${[f.n && `${pct(f.opinion, f.n)} % d'opinions`, md.total && `Télé et radio : ${heures(md.total)}`, pr.articles && `${pr.articles} articles de presse`].filter(Boolean).join(' · ')}</div>
     ${c.n && peu ? `<span class="mention">Échantillon insuffisant (moins de ${SEUIL} propos)</span>` : ''}
   </a>`;
@@ -870,6 +880,9 @@ async function vueRegistre(v, arg) {
     </a>`).join('') || `<p class="vide-etat">${onglet === 'service' ? 'Aucune affirmation en service. Les brouillons venant des fact-checks attendent dans l\'onglet Brouillons.' : 'Aucun brouillon.'}</p>`}`;
 }
 
+// Fausse information non corrigée : répétée après le démenti, ou postée avant et laissée en ligne.
+const maintenue = (a, c) => !!a.dementi && (c.date > a.dementi || (c.source === 'reseaux' && c.statut === 'confirme'));
+
 // Indices repérés automatiquement pour aider à trier une phrase : jamais une décision.
 function aideTri(aide) {
   if (!aide || !aide.raison) return '';
@@ -891,7 +904,7 @@ async function vueAffirmation(v, aid, publique = false) {
   // Le site public ne reçoit ni mots-clés ni exclusions.
   a.groupes = a.groupes || []; a.exclusions = a.exclusions || [];
   const corr = a.correspondances;
-  const ordre = { a_confirmer: 0, confirme: 1, rejete: 2 };
+  const ordre = { a_confirmer: 0, confirme: 1, corrige: 1, rejete: 2 };
   // À confirmer d'abord, et parmi elles celles sans marque de citation ou de contestation.
   corr.sort((x, y) => ordre[x.statut] - ordre[y.statut] || (!!x.aide.raison - !!y.aide.raison) || y.date.localeCompare(x.date));
   const motsCles = a.groupes.flat();
@@ -910,10 +923,12 @@ async function vueAffirmation(v, aid, publique = false) {
       <div class="source">${fdate(c.date)}<br>${NOM_SOURCE[c.source] || c.source}${c.type !== 'fait' ? `<br>(${NOM_TYPE[c.type].toLowerCase()})` : ''}</div>
       <div><div>${surligner(c.texte)}</div>
         ${c.statut === 'a_confirmer' ? aideTri(c.aide) : ''}
-        <div class="source">${p ? `<a href="#/p/${p.id}">${esc(p.nom)}</a> · ${esc((S.partis[p.parti] || {}).sigle || '')}` : esc(c.personne)}${a.dementi && c.date > a.dementi ? ' · après démenti' : ''} · <a href="${esc(c.url)}" target="_blank" rel="noopener">source</a></div></div>
+        <div class="source">${p ? `<a href="#/p/${p.id}">${esc(p.nom)}</a> · ${esc((S.partis[p.parti] || {}).sigle || '')}` : esc(c.personne)}${maintenue(a, c) ? ' · maintenue malgré le démenti' : ''} · <a href="${esc(c.url)}" target="_blank" rel="noopener">source</a></div></div>
       <div class="choix">${c.statut === 'a_confirmer'
         ? '<button data-s="confirme" class="principal">Confirmer</button><button data-s="rejete">Écarter</button>'
-        : `<span class="petit ${c.statut === 'confirme' ? 'rouge' : 'muet'}">${c.statut === 'confirme' ? 'Confirmée' : 'Écartée'}</span><button class="discret" data-s="a_confirmer">Annuler</button>`}</div>
+        : `<span class="petit ${c.statut === 'confirme' ? 'rouge' : 'muet'}">${{ confirme: 'Confirmée', corrige: 'Retirée ou corrigée par l\'auteur', rejete: 'Écartée' }[c.statut]}</span>
+           ${c.statut === 'confirme' && c.source === 'reseaux' ? '<button class="discret" data-s="corrige">Retirée par l\'auteur</button>' : ''}
+           <button class="discret" data-s="a_confirmer">Annuler</button>`}</div>
     </div>`;
   };
   const nombreFr = n => n == null ? '' : n.toLocaleString('fr-FR');
@@ -1029,17 +1044,17 @@ async function vueAffirmation(v, aid, publique = false) {
 
 // Répétitions confirmées d'une affirmation, pour le public.
 function listePublique(a) {
-  const conf = a.correspondances.filter(c => c.statut === 'confirme').sort((x, y) => y.date.localeCompare(x.date));
+  const conf = a.correspondances.filter(c => ['confirme', 'corrige'].includes(c.statut)).sort((x, y) => y.date.localeCompare(x.date));
   const elus = new Set(conf.map(c => c.personne));
-  const apres = conf.filter(c => a.dementi && c.date > a.dementi).length;
+  const apres = conf.filter(c => maintenue(a, c)).length;
   return `<div class="carte" style="margin-bottom:14px">
     <h3>Qui l'a répétée</h3>
-    ${conf.length ? `<p class="petit"><b class="rouge">${conf.length} fois</b> par ${elus.size} personnalité${elus.size > 1 ? 's' : ''}${apres ? `, dont ${apres} fois après le démenti` : ''}.</p>
+    ${conf.length ? `<p class="petit"><b class="rouge">${conf.length} fois</b> par ${elus.size} personnalité${elus.size > 1 ? 's' : ''}${apres ? `, dont ${apres} maintenue${apres > 1 ? 's' : ''} malgré le démenti (répétée après lui, ou laissée en ligne sans correction)` : ''}.</p>
     ${conf.map(c => {
       const p = S.pers[c.personne];
       return `<div class="verdict"><div class="source">${fdate(c.date)}<br>${NOM_SOURCE[c.source] || c.source}</div>
         <div><div class="citation">${esc(c.texte)}</div>
-        <div class="source">${p ? `<a href="#/p/${p.id}">${esc(p.nom)}</a> · ${esc((S.partis[p.parti] || {}).sigle || '')}` : ''}${a.dementi && c.date > a.dementi ? ' · <span class="rouge">après démenti</span>' : ''}</div></div>
+        <div class="source">${p ? `<a href="#/p/${p.id}">${esc(p.nom)}</a> · ${esc((S.partis[p.parti] || {}).sigle || '')}` : ''}${maintenue(a, c) ? ' · <span class="rouge">maintenue malgré le démenti</span>' : ''}${c.statut === 'corrige' ? ' · retirée ou corrigée par son auteur' : ''}</div></div>
         <a class="source" href="${esc(c.url)}" target="_blank" rel="noopener">source</a></div>`;
     }).join('')}` : '<p class="muet">Aucune répétition confirmée pour l\'instant.</p>'}
   </div>`;
@@ -1065,7 +1080,7 @@ async function vueAffirmationsPub(v) {
         <div class="rangee" style="align-items:flex-start">
           <div style="flex:1"><div class="citation" style="font-size:17px">${esc(a.affirmation)}</div>
             ${a.realite ? `<div class="petit" style="margin-top:6px"><b>En réalité :</b> ${esc(a.realite)}</div>` : ''}</div>
-          <div class="compteur" style="flex:none">${x ? `<b>${x.n}</b><span>répétition${x.n > 1 ? 's' : ''}<br>${x.elus.size} élu${x.elus.size > 1 ? 's' : ''}${x.apres ? `, ${x.apres} après démenti` : ''}</span>` : '<b>0</b><span>répétition confirmée</span>'}</div>
+          <div class="compteur" style="flex:none">${x ? `<b>${x.n}</b><span>répétition${x.n > 1 ? 's' : ''}<br>${x.elus.size} élu${x.elus.size > 1 ? 's' : ''}${x.apres ? `, ${x.apres} malgré le démenti` : ''}</span>` : '<b>0</b><span>répétition confirmée</span>'}</div>
         </div>
         ${a.nature === 'estimations' ? '<div class="mention">Fondé sur des estimations</div>' : ''}
       </a>`;
@@ -1129,10 +1144,14 @@ function vueAccueil(v) {
     const deputes = Object.keys(S.d.presence).map(id => [id, presenceDe(id)]).filter(([, r]) => r && r.solennels >= 10);
     const solMed = mediane(deputes.map(([, r]) => r.sol));
     const moitie = deputes.filter(([, r]) => r.sol < 0.5).length;
+    // Temps de parole : toutes les personnalités politiques relevées par l'Arcom, suivies ou non.
     const dernier = S.d.medias_mois.slice(-3);
-    const antenne = S.d.personnes.map(p => [p.id, Object.entries(S.d.medias[p.id] || {}).filter(([m]) => dernier.includes(m))
-      .reduce((s, [, t]) => s + Object.values(t).reduce((a, b) => a + b, 0), 0)]).filter(x => x[1]).sort((a, b) => b[1] - a[1]);
-    const totalAntenne = antenne.reduce((s, x) => s + x[1], 0);
+    const parNom = {};
+    dernier.forEach(m => (S.d.medias_tous[m] || []).forEach(([nom, sec]) => { parNom[nom] = (parNom[nom] || 0) + sec; }));
+    const index = Object.fromEntries(S.d.personnes.map(p => [norm(p.nom).replace(/-/g, ' ').split(' ').sort().join(' '), p.id]));
+    const antenne = Object.entries(parNom).sort((a, b) => b[1] - a[1])
+      .map(([nom, sec]) => [index[norm(nom).replace(/-/g, ' ').split(' ').filter(Boolean).sort().join(' ')] || null, sec, nom]);
+    const totalAntenne = dernier.reduce((s, m) => s + (S.d.medias_totaux[m] || 0), 0);
     const top10 = antenne.slice(0, 10).reduce((s, x) => s + x[1], 0);
     const c = compter(S.d.verdicts);
     const parlent = new Set(S.d.phrases.filter(l => l[7] === 'seance').map(l => l[0]));
@@ -1158,36 +1177,37 @@ function vueAccueil(v) {
   const periodeArcom = st.dernier.length ? `${fdate(st.dernier[0])} – ${fdate(st.dernier.at(-1))}` : '';
   const hero = st.fx.length ? `
       <div class="hero-chiffre">${st.fx.length.toLocaleString('fr-FR')} fois</div>
-      <p class="hero-texte">Des affirmations démontrées mensongères ont été répétées <b>${st.fx.length} fois</b> par <b>${st.auteurs.length} personnalité${st.auteurs.length > 1 ? 's' : ''}</b>${st.apres ? `, dont <b>${st.apres} fois après la publication du démenti</b>` : ''}.</p>
+      <p class="hero-texte"><b>${st.auteurs.length} personnalité${st.auteurs.length > 1 ? 's' : ''} politique${st.auteurs.length > 1 ? 's ont' : ' a'}</b> répété des informations démenties, ${st.fx.length} fois au total${st.apres ? `, dont <b>${st.apres} sans jamais les corriger</b>` : ''}.</p>
       ${st.porteeAuteurs ? `<p class="hero-sous">Leurs comptes totalisent ${nbCourt(st.porteeAuteurs)} abonnés.</p>` : ''}`
     : `
       <div class="hero-chiffre">${st.solMed != null ? pct(1 - st.solMed, 1) + ' %' : '–'}</div>
-      <p class="hero-texte">des votes solennels de l'Assemblée se font sans le député médian. <b>${st.moitie} députés</b> ont été absents à plus d'un vote solennel sur deux.</p>
-      <p class="hero-sous">Les votes solennels portent sur l'ensemble d'un texte et sont annoncés à l'avance. Un vote confié à un collègue (délégation) compte comme une absence.</p>`;
+      <p class="hero-texte">des grands votes de l'Assemblée se font sans le député médian. <b>${st.moitie} députés</b> manquent plus d'un grand vote sur deux.</p>
+      <p class="hero-sous">Grands votes : les votes solennels, sur l'ensemble d'un texte, annoncés à l'avance. Un vote confié à un collègue compte comme une absence.</p>`;
   v.innerHTML = `
     <section class="hero">${hero}</section>
     <div class="chocs">
-      <div class="choc-tuile"><b>${st.apres || 0}</b><span>répétitions d'une affirmation mensongère <em>après</em> son démenti public</span></div>
-      ${st.fx.length ? `<div class="choc-tuile"><b>${st.moitie}</b><span>députés absents à plus d'un vote solennel sur deux</span></div>`
-        : `<div class="choc-tuile"><b>${st.muets}</b><span>députés ne sont jamais intervenus en séance publique (en fonction depuis au moins six mois)</span></div>`}
-      <div class="choc-tuile"><b>${st.totalAntenne ? pct(st.top10, st.totalAntenne) + ' %' : '–'}</b><span>du temps de parole à la télé et à la radio des personnalités suivies revient à 10 d'entre elles${periodeArcom ? ` (${periodeArcom})` : ''}</span></div>
+      <div class="choc-tuile"><b>${st.apres || 0}</b><span>fausses informations répétées ou laissées en ligne malgré un démenti public</span></div>
+      ${st.fx.length ? `<div class="choc-tuile"><b>${st.moitie}</b><span>députés manquent plus d'un grand vote sur deux</span></div>`
+        : `<div class="choc-tuile"><b>${st.muets}</b><span>députés n'ont jamais pris la parole dans l'hémicycle en six mois de mandat ou plus</span></div>`}
+      <div class="choc-tuile"><b>${st.totalAntenne ? pct(st.top10, st.totalAntenne) + ' %' : '–'}</b><span>du temps de parole des politiques à la télé et à la radio est pris par 10 personnalités${periodeArcom ? ` (${periodeArcom})` : ''}</span></div>
       ${st.c.n >= SEUIL ? `<div class="choc-tuile"><b>${pct(st.c.faux + st.c.trompeur, st.c.n)} %</b><span>des propos vérifiés par les fact-checkers sont faux ou trompeurs</span></div>`
-        : `<div class="choc-tuile"><b>${Math.round(st.totalAntenne / 3600).toLocaleString('fr-FR')} h</b><span>de temps de parole à la télé et à la radio pour les personnalités suivies, en 3 mois${periodeArcom ? ` (${periodeArcom})` : ''}</span></div>`}
+        : `<div class="choc-tuile"><b>${Math.round(st.totalAntenne / 3600).toLocaleString('fr-FR')} h</b><span>de temps de parole des politiques à la télé et à la radio en 3 mois${periodeArcom ? ` (${periodeArcom})` : ''}</span></div>`}
     </div>
     <div class="deux">
       <div class="carte"><h3>Les affirmations mensongères les plus répétées</h3>
         ${topAff.length ? topAff.map(([aid, x]) => `<a class="ligne-aff" href="#/affirmation/${aid}"><span class="citation">${esc(S.d.registre_noms[aid] || '')}</span><span class="droite"><b class="rouge">${x.n} fois</b><br><span class="muet petit">${x.elus.size} élu${x.elus.size > 1 ? 's' : ''}</span></span></a>`).join('')
           : `<p class="muet petit">Aucune répétition confirmée pour l'instant. <a href="#/affirmations">Voir les affirmations suivies</a>.</p>`}</div>
       <div class="carte"><h3>Ceux qui les répètent le plus</h3>
-        ${topMensonges.length ? topMensonges.map(([id, x]) => ligneP(id, `<b class="rouge">${x.n} fois</b>${x.apres ? `<br><span class="muet petit">${x.apres} après démenti</span>` : ''}`)).join('')
+        ${topMensonges.length ? topMensonges.map(([id, x]) => ligneP(id, `<b class="rouge">${x.n} fois</b>${x.apres ? `<br><span class="muet petit">${x.apres} malgré le démenti</span>` : ''}`)).join('')
           : '<p class="muet petit">Aucune répétition confirmée pour l\'instant.</p>'}</div>
     </div>
     <div class="deux">
-      <div class="carte"><h3>Les plus absents aux votes solennels</h3>
-        ${absents.map(([id, r]) => ligneP(id, `<b>${pct(1 - r.sol, 1)} %</b><br><span class="muet petit">absent sur ${r.solennels} votes</span>`)).join('')}
-        <p class="mention">Présence physique depuis la prise de fonction ; un vote par délégation compte comme une absence. Une absence peut être justifiée (maladie, mission, congé). Députés ayant eu au moins 10 votes solennels.</p></div>
+      <div class="carte"><h3>Les plus absents aux grands votes</h3>
+        ${absents.map(([id, r]) => ligneP(id, `<b>${pct(1 - r.sol, 1)} %</b><br><span class="muet petit">de ${r.solennels} votes manqués</span>`)).join('')}
+        <p class="mention">Votes solennels depuis la prise de fonction ; un vote confié à un collègue compte comme une absence. Une absence peut être justifiée (maladie, mission, congé).</p></div>
       <div class="carte"><h3>Les plus présents à la télé et à la radio</h3>
-        ${st.antenne.slice(0, 5).map(([id, sec]) => ligneP(id, `<b>${heures(sec)}</b>`)).join('')}
+        ${st.antenne.slice(0, 5).map(([id, sec, nom]) => id ? ligneP(id, `<b>${heures(sec)}</b>`)
+          : `<div class="ligne-p"><span class="ini">${esc(nom.split(' ').map(x => x[0]).join('').slice(0, 2))}</span><span class="nom">${esc(nom.split(' ').slice(1).join(' ') + ' ' + nom.split(' ')[0].charAt(0) + nom.split(' ')[0].slice(1).toLowerCase())}<span class="muet petit"> · non suivi</span></span><span class="droite"><b>${heures(sec)}</b></span></div>`).join('')}
         <p class="mention">Temps de parole relevé par l'Arcom${periodeArcom ? `, ${periodeArcom}` : ''}.</p></div>
     </div>
     <div class="carte"><h3>Cette semaine</h3>
@@ -1335,7 +1355,7 @@ function vueMethode(v) {
     <h2>Affirmations mensongères répétées</h2>
     <p>Le <a href="#/affirmations">registre</a> rassemble des affirmations mensongères (« La Révolution française a eu lieu en 1515 »), avec ce qui est vrai, des preuves et la date à laquelle le démenti est public. Il se remplit à la main, depuis une phrase de n'importe quel propos, et automatiquement à partir des verdicts « faux » et « trompeur » des fact-checkers.</p>
     <p>Pour chaque affirmation en service, Beau Discours cherche dans tout ce qui a été collecté (séance, réseaux, presse, propos saisis) les phrases qui contiennent ses mots-clés. <b>Aucune ne compte avant d'être confirmée à la main</b> : il faut que la personne affirme la chose fausse comme un fait, et non qu'elle la cite ou la dénonce. Pour aider au tri, Beau Discours repère les tournures de citation (« je cite », « selon M. X », « comme l'a dit », guillemets), identifie la personne citée et cherche son propos d'origine dans tout ce qui a été collecté. Ce ne sont que des indices : la décision reste manuelle. Une même phrase republiée le même jour compte une fois.</p>
-    <p>Beau Discours compte les répétitions et celles faites <b>après le démenti</b>. Une affirmation présentée comme un fait alors qu'elle est contredite par les sources est qualifiée de <b>mensongère</b>.</p>
+    <p>Beau Discours compte toutes les répétitions, et parmi elles celles <b>maintenues malgré le démenti</b> : répétées après sa publication, ou publiées avant sur un réseau social et laissées en ligne sans retrait ni correction. Un post retiré ou corrigé par son auteur reste compté comme répétition, mais plus comme maintenu. Une affirmation présentée comme un fait alors qu'elle est contredite par les sources est qualifiée de <b>mensongère</b>.</p>
     <p>Quand la réalité n'est connue que par des <b>estimations</b> (fraude fiscale, coût d'une mesure…), Beau Discours cite toutes les estimations publiées qu'il connaît, donne la fourchette la plus large pour chaque chiffre et précise qu'il s'agit d'estimations. L'affirmation n'est qualifiée de mensongère que si elle est contredite par l'ensemble de ces estimations.</p>
     <p>Les affirmations proposées avec leurs sources sont en service d'emblée. Chacun peut <b>signaler</b> une source ou une conclusion erronée, à la manière des notes de la communauté : le signalement est examiné à la main, il n'a aucun effet automatique.</p>
     <h2>Rattachement au parti</h2>

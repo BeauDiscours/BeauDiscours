@@ -379,3 +379,9 @@ tr.clic:hover td, .ligne-p:hover, .ligne-aff:hover { background: var(--surface-2
 /* Filtres : ne débordent jamais de l'écran sur mobile. */
 .segments { flex-wrap: wrap; max-width: 100%; }
 .entete .filtres { min-width: 0; max-width: 100%; }
+/* Nuage des thèmes */
+.nuage { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 14px; padding: 14px 4px 6px; line-height: 1.15; }
+.nuage .mot { font-weight: 750; letter-spacing: -.02em; color: var(--encre-2); cursor: default; transition: color .15s; }
+.nuage .mot.fort { color: var(--scene); }
+.nuage .mot.faible { color: var(--encre-3); font-weight: 600; }
+.nuage .mot:hover { color: var(--encre); }
