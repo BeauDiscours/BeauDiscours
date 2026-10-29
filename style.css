@@ -10,6 +10,9 @@
   --v-vrai: #2b74b8;
   --v-trompeur: #c48a1c;
   --v-faux: #c2402a;
+  --halo-vert: #2e9d57;
+  --halo-orange: #e08a1e;
+  --halo-rouge: #d23a2a;
   --v-inverifiable: #8f8f8f;
   --t-fait: #0a9282;
   --t-opinion: #8a5fbf;
@@ -30,6 +33,9 @@
     --v-vrai: #4a94d8;
     --v-trompeur: #b38d2c;
     --v-faux: #d2456e;
+    --halo-vert: #4cc27a;
+    --halo-orange: #f0a040;
+    --halo-rouge: #ef5a4a;
     --v-inverifiable: #8a8a8a;
     --t-fait: #1f9e8f;
     --t-opinion: #a07ad4;
@@ -312,6 +318,9 @@ section[data-section] .deux:last-child { margin-bottom: 0; }
   --v-vrai: #4a94d8;
   --v-trompeur: #b38d2c;
   --v-faux: #d2456e;
+  --halo-vert: #4cc27a;
+  --halo-orange: #f0a040;
+  --halo-rouge: #ef5a4a;
   --v-inverifiable: #8a8a8a;
   --v-non-etaye: #8a6fd6;
   --t-fait: #1f9e8f;
@@ -323,6 +332,7 @@ section[data-section] .deux:last-child { margin-bottom: 0; }
   color-scheme: dark;
 }
 body[data-onglet="accueil"] { --scene: #ffd23f; }
+body[data-onglet="posts"] { --scene: #ff8a3d; }
 body[data-onglet="affirmations"] { --scene: #ff6b5b; }
 body[data-onglet="personnalites"] { --scene: #5cc8ff; }
 body[data-onglet="partis"] { --scene: #c49bff; }
@@ -391,6 +401,8 @@ tr.clic:hover td, .ligne-p:hover, .ligne-aff:hover { background: var(--surface-2
 /* Vérification des faits (Atelier) */
 .verif mark { background: color-mix(in srgb, var(--scene) 30%, transparent); color: var(--encre); }
 .piste-source { padding: 6px 0; border-bottom: 1px dashed var(--bord); }
+.controle { border-left: 3px solid; padding: 6px 10px; margin: 8px 0; background: color-mix(in srgb, var(--encre) 4%, transparent); }
+.controle .etiquette { margin-right: 6px; }
 .choix-verdict button[data-verdict] { border-width: 1px; }
 
 /* Médias */
@@ -405,3 +417,53 @@ tr.clic:hover td, .ligne-p:hover, .ligne-aff:hover { background: var(--surface-2
 .iv-boutons { display: flex; gap: 6px; flex-wrap: wrap; }
 .iv-date { display: flex; gap: 6px; align-items: center; }
 .iv-date input { width: auto; }
+
+/* ---------- Accueil, posts analysés, score de fiabilité ---------- */
+.presentation { max-width: 860px; padding: 24px 4px 10px; }
+.presentation h1 { font-size: clamp(28px, 4.5vw, 44px); line-height: 1.1; letter-spacing: -.02em; margin: 0 0 14px; }
+.presentation p { font-size: 17px; line-height: 1.5; margin: 0 0 10px; }
+.chocs:has(> :nth-child(3):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+a.choc-tuile { color: var(--encre); transition: border-color .15s, transform .15s; }
+a.choc-tuile:hover { text-decoration: none; border-color: var(--encre-3); transform: translateY(-1px); }
+.choc-rouge b { color: var(--halo-rouge); }
+.titre-section { font-size: 20px; margin: 26px 0 10px; }
+.halo-vert { --halo: var(--halo-vert); }
+.halo-orange { --halo: var(--halo-orange); }
+.halo-rouge { --halo: var(--halo-rouge); }
+.score { flex: none; min-width: 0; max-width: 74px; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 74px; height: 74px;
+  border-radius: 50%; border: 3px solid var(--halo, var(--bord)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--halo, transparent) 18%, transparent), 0 0 22px color-mix(in srgb, var(--halo, transparent) 45%, transparent); background: var(--surface); }
+.score b { font-size: 26px; font-weight: 800; line-height: 1; color: var(--halo, var(--encre-3)); font-variant-numeric: tabular-nums; }
+.score span { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--encre-3); margin-top: 3px; }
+.score.petit-score { width: 32px; height: 32px; max-width: 32px; border-width: 2px; box-shadow: 0 0 10px color-mix(in srgb, var(--halo) 40%, transparent); }
+.score.petit-score b { font-size: 12px; }
+.avertissement { font-size: 13px; color: var(--encre-2); background: var(--surface-2); border-radius: 10px; padding: 8px 12px; margin: 0 0 14px; }
+.liste-posts { display: flex; flex-direction: column; gap: 16px; }
+.post { background: var(--surface); border-radius: 14px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--halo) 55%, var(--bord));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--halo) 14%, transparent), 0 0 24px color-mix(in srgb, var(--halo) 22%, transparent); }
+.post-tete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.post-auteur { display: flex; align-items: center; gap: 8px; color: var(--encre); }
+.post-auteur img, .post-auteur .ini { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--encre-3); }
+.post-tete .etiquette-statut { margin-left: auto; }
+.post-texte { white-space: pre-line; line-height: 1.5; margin-bottom: 8px; overflow-wrap: anywhere; }
+.post-aff { border-top: 1px solid var(--bord); padding: 8px 0 4px; }
+.post-aff blockquote { margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--bord); color: var(--encre-2); }
+.post-pied { border-top: 1px solid var(--bord); padding-top: 6px; margin-top: 4px; text-align: right; }
+.etiquette-statut { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 650; color: #fff; }
+.etiquette-statut.vert { background: var(--halo-vert); }
+.etiquette-statut.orange { background: var(--halo-orange); }
+.etiquette-statut.rouge { background: var(--halo-rouge); }
+@media (max-width: 760px) {
+  .chocs:has(> :nth-child(3):last-child) { grid-template-columns: 1fr; }
+  .post-tete .etiquette-statut { margin-left: 0; }
+}
+.filtres-posts { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+.filtres-posts select { flex: 0 1 220px; min-width: 0; }
+.score.moyen-score { width: 48px; height: 48px; max-width: 48px; border-width: 2px; }
+.score.moyen-score b { font-size: 17px; }
+.carte.parti .titre { align-items: center; }
+.carte.parti .titre .score { margin-left: 8px; }
+.contribuer { margin-top: 6px; }
+.contribuer summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.contribuer form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.contribuer .segments label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; cursor: pointer; }
+.contribuer input[type=url], .contribuer textarea { width: 100%; box-sizing: border-box; }

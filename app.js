@@ -54,6 +54,7 @@ const CONTACT = window.CONTACT || '';
 const FICHIERS_STATIQUES = [
   [/^\/api\/donnees$/, 'data/donnees.json'], [/^\/api\/fiche\/(.+)$/, 'data/fiches/$1.json'],
   [/^\/api\/registre$/, 'data/registre.json'], [/^\/api\/registre\/(.+)$/, 'data/affirmations/$1.json'],
+  [/^\/api\/posts$/, 'data/posts.json'],
 ];
 
 async function api(chemin, corps) {
@@ -331,13 +332,13 @@ function colonnesMois(vs) {
 
 // ---------- Vues ----------
 const VUES = {
-  accueil: vueAccueil, affirmations: vueAffirmationsPub, affirmation: vueAffirmationPub,
+  accueil: vueAccueil, posts: vuePosts, affirmations: vueAffirmationsPub, affirmation: vueAffirmationPub,
   personnalites: vuePersonnalites, p: vuePersonne, partis: vuePartis, parti: vueParti,
   medias: vueMedias, media: vueParti,
   methode: vueMethode, atelier: vueAtelier, mentions: vueMentions,
 };
 // Onglet de navigation allumé pour chaque vue.
-const NAV = { accueil: 'accueil', affirmations: 'affirmations', affirmation: 'affirmations', personnalites: 'personnalites',
+const NAV = { accueil: 'accueil', posts: 'posts', affirmations: 'affirmations', affirmation: 'affirmations', personnalites: 'personnalites',
   p: 'personnalites', partis: 'partis', parti: 'partis', medias: 'medias', media: 'medias', methode: 'methode', atelier: 'atelier' };
 
 function route() {
@@ -404,10 +405,12 @@ function vuePartis(v) {
   lignes.forEach(x => {
     const ids = x.membres.map(m => m.id);
     x.md = mediasDe(ids); x.pr = presseDe(ids); x.ab = abonnesDe(ids).total;
+    x.posts = postsDe(ids); x.fiab = fiabiliteEns(ids);
     x.fx = faussetesDe(l => l[5] === x.p.id);
     x.pres = mediane(ids.map(presenceDe).filter(Boolean).map(r => r.sol));
   });
-  const total = compter(vs);
+  lignes.sort((a, b) => b.posts - a.posts || b.membres.length - a.membres.length);  // les plus gros d'abord
+  const total = lignes.reduce((n, x) => n + x.posts, 0);
   let corps;
   if (!S.d.personnes.length) {
     corps = '<p class="vide-etat">Première mise à jour en cours…</p>';
@@ -418,12 +421,11 @@ function vuePartis(v) {
   }
   v.innerHTML = `
     <div class="entete">
-      <div><h1>Partis</h1><div class="muet petit">${total.n} propos vérifiés · ${S.d.personnes.length} personnalités</div></div>
+      <div><h1>Partis</h1><div class="muet petit">${total.toLocaleString('fr-FR')} posts · ${S.d.personnes.filter(x => !estMedia(x.id)).length} personnalités · classés par nombre de posts</div></div>
       <div class="filtres">${filtresPeriode()}${filtresSource()}
         <div class="segments" data-groupe="affichage"><button data-val="cartes" class="${S.affichage === 'cartes' ? 'actif' : ''}">Cartes</button><button data-val="tableau" class="${S.affichage === 'tableau' ? 'actif' : ''}">Tableau</button></div>
       </div>
     </div>
-    <div class="rangee" style="margin-bottom:14px">${legende(VERDICTS)}</div>
     ${corps}`;
   brancherFiltres(v);
   v.querySelectorAll('th[data-col]').forEach(th => th.onclick = () => {
@@ -432,26 +434,25 @@ function vuePartis(v) {
   v.querySelectorAll('tr[data-href]').forEach(tr => tr.onclick = () => location.hash = tr.dataset.href);
 }
 
-function carteParti({ p, membres, c, f, md, pr, ab, fx }) {
-  const peu = c.n < SEUIL;
+function carteParti({ p, membres, f, md, pr, ab, fx, posts, fiab }) {
   return `<a class="carte parti" href="#/${estCollectifMedia(p.id) ? 'media' : 'parti'}/${p.id}">
     <span class="liseré" style="background:${p.couleur}"></span>
-    <div class="titre"><h2>${esc(p.nom)}</h2>${p.sigle !== p.nom ? `<span class="sigle">${esc(p.sigle)}</span>` : ''}<span class="compte">${membres.length} pers.</span></div>
+    <div class="titre"><h2>${esc(p.nom)}</h2>${p.sigle !== p.nom ? `<span class="sigle">${esc(p.sigle)}</span>` : ''}<span class="compte">${membres.length} pers.</span>${pastilleFiab(fiab, 'moyen')}</div>
     <div class="chiffres">
-      <div class="chiffre"><b>${c.n}</b><span>propos vérifiés</span></div>
-      <div class="chiffre ${peu ? 'insuffisant' : ''}"><b>${c.n ? pct(nonFiables(c), c.n) + ' %' : '–'}</b><span>non fiables</span></div>
+      <div class="chiffre"><b>${posts.toLocaleString('fr-FR')}</b><span>posts</span></div>
+      <div class="chiffre"><b class="${fiab.faux ? 'rouge' : ''}">${fiab.n ? `${fiab.faux} / ${fiab.n}` : '–'}</b><span>invalidés / analysés</span></div>
       <div class="chiffre"><b>${ab ? nbCourt(ab) : '–'}</b><span>abonnés cumulés</span></div>
     </div>
-    <div class="ligne-barre"><span>Verdicts</span><div class="${peu ? 'insuffisant' : ''}">${empile(c, VERDICTS, c.n, 'propos vérifiés')}</div></div>
     ${fx.n ? `<div class="mention" style="color:var(--v-faux)">${fx.affirmations.length} affirmation${fx.affirmations.length > 1 ? 's' : ''} mensongère${fx.affirmations.length > 1 ? 's' : ''} répétée${fx.affirmations.length > 1 ? 's' : ''} ${fx.n} fois${fx.apres ? `, dont ${fx.apres} malgré le démenti` : ''}</div>` : ''}
     <div class="mention">${[f.n && `${pct(f.opinion, f.n)} % d'opinions`, md.total && `Télé et radio : ${heures(md.total)}`, pr.articles && `${pr.articles} articles de presse`].filter(Boolean).join(' · ')}</div>
-    ${c.n && peu ? `<span class="mention">Échantillon insuffisant (moins de ${SEUIL} propos)</span>` : ''}
+    ${fiab.n && fiab.score == null ? `<span class="mention">Score à partir de ${MIN_POSTS_SCORE} posts analysés</span>` : ''}
   </a>`;
 }
 
 function tableauPartis(lignes) {
   const cols = [
-    ['nom', 'Parti', x => x.p.nom], ['pers', 'Pers.', x => x.membres.length], ['n', 'Vérifiés', x => x.c.n],
+    ['nom', 'Parti', x => x.p.nom], ['pers', 'Pers.', x => x.membres.length], ['posts', 'Posts', x => x.posts],
+    ['fiab', 'Fiabilité', x => x.fiab.score], ['n', 'Vérifiés', x => x.c.n],
     ...VERDICTS.map(v => [v.id, v.nom + ' %', x => x.c.n ? pct(x.c[v.id], x.c.n) : null]),
     ['moy', 'Non fiables moy./pers. %', x => x.c.n ? Math.round(100 * nonFiables(x.m)) : null],
     ['ph', 'Phrases', x => x.f.n], ['op', 'Opinions %', x => x.f.n ? pct(x.f.opinion, x.f.n) : null],
@@ -468,7 +469,7 @@ function tableauPartis(lignes) {
     <thead><tr>${cols.map(([k, t], i) => `<th data-col="${k}" class="${i ? 'n' : ''}">${t}${S.tri.col === k ? (S.tri.sens > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
     <tbody>${lignes.map(x => `<tr class="clic" data-href="#/parti/${x.p.id}">${cols.map(([k, , f], i) => {
       const val = f(x);
-      const grise = i >= 3 && i <= 7 && x.c.n < SEUIL ? ' muet' : '';
+      const grise = i >= 5 && i <= 9 && x.c.n < SEUIL ? ' muet' : '';
       const aff = k === 'ab' && val ? nbCourt(val) : val;
       return `<td class="${i ? 'n' : ''}${grise}">${i ? (aff ?? '–') : `<span class="badge"><i style="background:${x.p.couleur}"></i>${esc(val)}</span>`}</td>`;
     }).join('')}</tr>`).join('')}</tbody></table>
@@ -498,13 +499,13 @@ function vueParti(v, id) {
   v.innerHTML = `
     <div class="entete">
       <div><div class="muet petit">${media ? `<a href="#/medias">Médias</a>${groupe ? ` · <a href="#/media/${groupe.id}">${esc(groupe.nom)}</a>` : ''}` : '<a href="#/partis">Partis</a>'}</div>
-        <h1>${media ? '' : `<span class="badge" style="font-size:15px;vertical-align:4px"><i style="background:${p.couleur}"></i>${esc(p.sigle)}</span> `}${esc(p.nom)}</h1>
+        <div class="rangee" style="align-items:center;justify-content:flex-start;gap:14px"><h1 style="flex:none">${media ? '' : `<span class="badge" style="font-size:15px;vertical-align:4px"><i style="background:${p.couleur}"></i>${esc(p.sigle)}</span> `}${esc(p.nom)}</h1>${pastilleFiab(fiabiliteEns(idsMembres), 'grand')}</div>
         <div class="muet petit">${membres.length} ${media ? 'intervenants suivis' : 'personnalités suivies'} · ${c.n} propos vérifiés${S.groupesMedias[id] ? ` · ${ens.length} rédaction${ens.length > 1 ? 's' : ''}` : ''}${p.source ? ` · <a href="${esc(p.source)}" target="_blank" rel="noopener">propriétaire : source</a>` : ''}</div></div>
       <div class="filtres">${filtresPeriode()}${filtresSource()}</div>
     </div>
     ${indicateurs([
-      { val: fx.n ? `${fx.affirmations.length} · ${fx.n} fois` : '0', lib: 'affirmations mensongères répétées', choc: fx.n > 0 },
-      { val: c.n ? `${pct(nonFiables(c), c.n)} %` : '–', lib: c.n < SEUIL ? `non fiables (${c.n} vérifiés, trop peu)` : 'des propos vérifiés non fiables' },
+      { val: postsDe(idsMembres).toLocaleString('fr-FR'), lib: 'posts' },
+      (() => { const fi = fiabiliteEns(idsMembres); return { val: fi.n ? `<a href="#/posts?${media ? 'media' : 'parti'}=${id}&statut=faux">${fi.faux} / ${fi.n}</a>` : '–', lib: 'posts analysés avec une fausse information', choc: fi.faux > 0 }; })(),
       { val: abP ? nbCourt(abP) : '–', lib: 'abonnés cumulés' },
       media ? { val: f.n ? pct(f.opinion, f.n) + ' %' : '–', lib: "d'opinions dans leurs propos" } : { val: solMed != null ? pct(solMed, 1) + ' %' : '–', lib: 'votes solennels (médiane des députés)' },
     ])}
@@ -626,7 +627,7 @@ function vuePersonne(v, id) {
     <div class="fiche-tete">
       ${p.image ? `<figure class="photo-cadre"><img class="photo" src="${esc(p.image)}" alt="" loading="lazy"><figcaption><a href="${esc(p.image.split('?')[0].replace('Special:FilePath/', 'File:'))}" target="_blank" rel="noopener">Photo : Wikimedia Commons</a></figcaption></figure>` : `<div class="photo vide">${esc(initiales(p))}</div>`}
       <div style="flex:1">
-        <h1>${esc(p.nom)}</h1>
+        <div class="rangee" style="align-items:center;justify-content:flex-start;gap:14px"><h1 style="flex:none">${esc(p.nom)}</h1>${pastilleScore(id, true)}</div>
         <div style="margin:6px 0">${badgeParti(p.parti)}<span class="muet petit">${groupe}${p.parti_a_verifier ? ` · Wikidata indique : ${esc(p.parti_a_verifier)}` : ''}</span></div>
         <div>${esc(p.fonction || '')}</div>
         <div class="muet petit">${[
@@ -638,7 +639,7 @@ function vuePersonne(v, id) {
     </div>
     <div class="filtres" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${filtresPeriode()}${filtresSource()}</div>
     ${indicateurs([
-      { val: fxP.n ? `${fxP.affirmations.length} · ${fxP.n} fois` : '0', lib: 'affirmations mensongères répétées', choc: fxP.n > 0 },
+      (() => { const f = fiabiliteDe(id); return { val: f.n ? `<a href="#/posts?personne=${id}&statut=faux">${f.faux} / ${f.n}</a>` : '–', lib: 'posts analysés contenant une fausse information', choc: f.faux > 0 }; })(),
       { val: c.n ? `${nonFiables(c)} / ${c.n}` : '–', lib: 'propos vérifiés non fiables (faux, trompeurs, non étayés)' },
       { val: abT ? nbCourt(abT) : '–', lib: 'abonnés, portée' },
       pres ? { val: pct(pres.sol, 1) + ' %', lib: 'votes solennels' } : { val: tv ? heures(tv) : '–', lib: 'de télé et radio' },
@@ -1171,27 +1172,27 @@ function vueMedias(v) {
     const x = { p: S.partis[id], ...statsParti(id, vs, ps, ls) };
     const ids = x.membres.map(m => m.id);
     x.md = { total: 0 }; x.pr = presseDe(ids); x.ab = abonnesDe(ids).total;
+    x.posts = postsDe(ids); x.fiab = fiabiliteEns(ids);
     x.fx = faussetesDe(l => membresDe(id).includes(l[5]));
     return x;
   };
-  const groupes = S.d.groupes_medias || [];
+  // Les plus gros d'abord : groupes, puis rédactions dans chaque groupe, par posts cumulés.
+  const groupes = (S.d.groupes_medias || []).map(g => ({ g, x: stats(g.id), red: g.medias.map(stats).sort((a, b) => b.posts - a.posts || b.membres.length - a.membres.length) }))
+    .sort((a, b) => /non renseign/i.test(a.g.nom) - /non renseign/i.test(b.g.nom) || b.x.posts - a.x.posts || b.x.membres.length - a.x.membres.length);  // « non renseigné » en dernier
   const n = S.d.personnes.filter(p => p.categorie === 'media').length;
   v.innerHTML = `
     <div class="entete">
       <div><h1>Médias</h1><div class="muet petit">${n} journalistes, éditorialistes et chroniqueurs suivis · par groupe propriétaire et par rédaction</div></div>
       <div class="filtres">${filtresPeriode()}${filtresSource()}</div>
     </div>
-    <div class="rangee" style="margin-bottom:14px">${legende(VERDICTS)}</div>
-    ${!groupes.length ? '<p class="vide-etat">Aucun intervenant retenu pour l\'instant.</p>' : groupes.map(g => {
-      const x = stats(g.id);
-      return `<section class="groupe-media">
-        <div class="rangee" style="justify-content:space-between;align-items:baseline">
-          <h2><a href="#/media/${g.id}"><span class="badge"><i style="background:${g.couleur}"></i>${esc(g.nom)}</span></a></h2>
-          <span class="muet petit">${x.membres.length} intervenant${x.membres.length > 1 ? 's' : ''} · ${x.c.n} propos vérifiés${x.c.n ? ` · ${pct(nonFiables(x.c), x.c.n)} % non fiables` : ''}${x.ab ? ` · ${nbCourt(x.ab)} abonnés` : ''}</span>
+    ${!groupes.length ? '<p class="vide-etat">Aucun intervenant retenu pour l\'instant.</p>' : groupes.map(({ g, x, red }) => `<section class="groupe-media">
+        <div class="rangee" style="justify-content:space-between;align-items:center">
+          <h2 style="flex:none"><a href="#/media/${g.id}"><span class="badge"><i style="background:${g.couleur}"></i>${esc(g.nom)}</span></a></h2>
+          <span class="muet petit" style="flex:none">${x.membres.length} intervenant${x.membres.length > 1 ? 's' : ''} · ${x.posts.toLocaleString('fr-FR')} posts${x.fiab.n ? ` · ${x.fiab.faux} / ${x.fiab.n} analysés avec une fausse information` : ''}${x.ab ? ` · ${nbCourt(x.ab)} abonnés` : ''}</span>
+          ${pastilleFiab(x.fiab, 'moyen')}
         </div>
-        <div class="grille">${g.medias.map(m => carteParti(stats(m))).join('')}</div>
-      </section>`;
-    }).join('')}
+        <div class="grille">${red.map(carteParti).join('')}</div>
+      </section>`).join('')}
     <p class="mention">Le média retenu est celui où l'intervenant s'exprime principalement aujourd'hui ; le propriétaire est celui qui contrôle le média (sources en lien sur chaque groupe). Les statistiques des médias ne sont jamais mêlées à celles des partis.</p>`;
   brancherFiltres(v);
 }
@@ -1289,89 +1290,211 @@ async function vueIntervenants(v) {
 }
 
 // ---------- Accueil : les chiffres qui frappent ----------
+// ---------- Posts analysés et fiabilité ----------
+// S.d.posts_ia : [personne, date, statut, clé, thèmes] ; statut faux, inverifiable, correct ou null
+// (rien de vérifiable). Score de fiabilité = 100 − part des posts analysés qui contiennent une
+// fausse information.
+const STATUT_POST = {
+  faux: ['Contient une fausse information', 'rouge'], inverifiable: ['Invérifiable', 'orange'], correct: ['Correct', 'vert'],
+};
+const MIN_POSTS_SCORE = 10;   // en dessous, pas de score : l'échantillon est trop petit
+function fiabiliteEns(ids) {
+  const ens = new Set(ids);
+  const ps = (S.d.posts_ia || []).filter(l => ens.has(l[0]));
+  const faux = ps.filter(l => l[2] === 'faux').length;
+  return { n: ps.length, faux, score: ps.length >= MIN_POSTS_SCORE ? Math.round(100 * (1 - faux / ps.length)) : null };
+}
+const fiabiliteDe = id => fiabiliteEns([id]);
+const couleurScore = sc => sc == null ? '' : sc >= 75 ? 'vert' : sc >= 50 ? 'orange' : 'rouge';
+// taille : 'grand' (en-tête de fiche), 'moyen' (carte), sinon petit (listes).
+function pastilleFiab(f, taille) {
+  const grand = taille === 'grand' || taille === true;
+  if (f.score == null) return taille ? `<div class="score score-vide${grand ? '' : ' moyen-score'}" title="Moins de ${MIN_POSTS_SCORE} posts analysés"><b>–</b>${grand ? '<span>fiabilité</span>' : ''}</div>` : '';
+  return `<div class="score halo-${couleurScore(f.score)}${grand ? '' : taille === 'moyen' ? ' moyen-score' : ' petit-score'}" title="Fiabilité : ${f.faux} post${f.faux > 1 ? 's' : ''} avec une fausse information sur ${f.n} analysés"><b>${f.score}</b>${grand ? '<span>fiabilité</span>' : ''}</div>`;
+}
+const pastilleScore = (id, taille) => pastilleFiab(fiabiliteDe(id), taille);
+
 function vueAccueil(v) {
   const st = surTout(() => {
-    const fx = S.d.faussetes.filter(l => !estMedia(l[0]));
-    const auteurs = [...new Set(fx.map(l => l[0]))];
-    const parPers = {};
-    fx.forEach(l => { const x = parPers[l[0]] = parPers[l[0]] || { n: 0, apres: 0 }; x.n++; if (l[4]) x.apres++; });
-    const parAff = {};
-    fx.forEach(l => { const x = parAff[l[1]] = parAff[l[1]] || { n: 0, elus: new Set() }; x.n++; x.elus.add(l[0]); });
-    const deputes = Object.keys(S.d.presence).map(id => [id, presenceDe(id)]).filter(([, r]) => r && r.solennels >= 10);
-    const solMed = mediane(deputes.map(([, r]) => r.sol));
-    const moitie = deputes.filter(([, r]) => r.sol < 0.5).length;
+    const posts = (S.d.posts_ia || []).filter(l => !estMedia(l[0]));
+    const faux = posts.filter(l => l[2] === 'faux');
+    const themes = {};
+    faux.forEach(l => (l[4] || []).forEach(t => themes[t] = (themes[t] || 0) + 1));
+    const theme = Object.entries(themes).sort((x, y) => y[1] - x[1])[0];
     // Temps de parole : toutes les personnalités politiques relevées par l'Arcom, suivies ou non.
     const dernier = S.d.medias_mois.slice(-3);
     const parNom = {};
     dernier.forEach(m => (S.d.medias_tous[m] || []).forEach(([nom, sec]) => { parNom[nom] = (parNom[nom] || 0) + sec; }));
     const index = Object.fromEntries(S.d.personnes.map(p => [norm(p.nom).replace(/-/g, ' ').split(' ').sort().join(' '), p.id]));
-    const antenne = Object.entries(parNom).sort((a, b) => b[1] - a[1])
+    const antenne = Object.entries(parNom).sort((x, y) => y[1] - x[1])
       .map(([nom, sec]) => [index[norm(nom).replace(/-/g, ' ').split(' ').filter(Boolean).sort().join(' ')] || null, sec, nom]);
-    const totalAntenne = dernier.reduce((s, m) => s + (S.d.medias_totaux[m] || 0), 0);
-    const top10 = antenne.slice(0, 10).reduce((s, x) => s + x[1], 0);
-    const c = compter(S.d.verdicts.filter(x => !estMedia(x.personne)));
-    const parlent = new Set(S.d.phrases.filter(l => l[7] === 'seance').map(l => l[0]));
-    // Seulement les députés en fonction depuis au moins six mois : un suppléant arrivé le mois dernier n'a pas eu le temps.
-    const sixMois = new Date(Date.now() - 182 * 864e5).toISOString().slice(0, 10);
-    const muets = Object.keys(S.d.presence).filter(id => (S.pers[id]?.depuis || '') <= sixMois && !parlent.has(id)).length;
-    const semaine = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
-    return {
-      fx, auteurs, parPers, parAff, deputes, solMed, moitie, antenne, totalAntenne, top10, c, dernier, muets,
-      apres: fx.filter(l => l[4]).length, porteeAuteurs: abonnesDe(auteurs).total,
-      semaineFx: fx.filter(l => l[2] >= semaine).length, semaineV: S.d.verdicts.filter(x => !estMedia(x.personne) && (x.date_verif || x.date) >= semaine).length,
+    // Presse : articles qui citent la personnalité sur les trois derniers mois relevés.
+    const moisPresse = [...new Set(Object.values(S.d.presse).flatMap(p => Object.keys(p.mois)))].sort().slice(-3);
+    const presse = Object.entries(S.d.presse).filter(([id]) => S.pers[id] && !estMedia(id))
+      .map(([id, p]) => [id, moisPresse.reduce((n, m) => n + (p.mois[m] || 0), 0)]).filter(x => x[1]).sort((x, y) => y[1] - x[1]);
+    return { posts, faux, theme, antenne, dernier, presse, moisPresse };
+  });
+  const ligneP = (id, droite) => {
+    const p = S.pers[id], pa = S.partis[p.parti] || S.partis.autres;
+    return `<a class="ligne-p" href="#/p/${id}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : `<span class="ini">${esc(initiales(p))}</span>`}
+      <span class="nom">${esc(p.nom)}<span class="muet petit"> · ${esc(pa.sigle)}</span></span>${pastilleScore(id)}<span class="droite">${droite}</span></a>`;
+  };
+  const nonSuivi = (nom, droite) => `<div class="ligne-p"><span class="ini">${esc(nom.split(' ').map(x => x[0]).join('').slice(0, 2))}</span><span class="nom">${esc(nom.split(' ').slice(1).join(' ') + ' ' + nom.split(' ')[0].charAt(0) + nom.split(' ')[0].slice(1).toLowerCase())}<span class="muet petit"> · non suivi</span></span><span class="droite">${droite}</span></div>`;
+  const periodeArcom = st.dernier.length ? `${fdate(st.dernier[0])} – ${fdate(st.dernier.at(-1))}` : '';
+  const nomTheme = st.theme ? (S.d.theme_noms[st.theme[0]] || st.theme[0]) : '';
+  v.innerHTML = `
+    <section class="presentation">
+      <h1>Ce que disent les responsables politiques, vérifié.</h1>
+      <p>Beau Discours relève ce que publient et déclarent les personnalités politiques françaises : réseaux sociaux, hémicycle, presse, télévision et radio. Chaque post est découpé en affirmations, et chaque affirmation est confrontée aux sources : chiffres officiels, articles de presse, propos d'origine.</p>
+      <p>L'objectif : que chacun puisse savoir, en un coup d'œil, qui dit vrai, qui se trompe et qui désinforme, avec les preuves sous les yeux.</p>
+      <p class="muet">Un outil communautaire : quand aucune source fiable ne permet de trancher, c'est au public d'apporter les siennes. Les verdicts sont établis automatiquement à partir des sources citées ; des erreurs sont possibles, et elles sont corrigées dès qu'elles sont signalées.</p>
+    </section>
+    <div class="chocs">
+      <a class="choc-tuile" href="#/posts"><b>${st.posts.length.toLocaleString('fr-FR')}</b><span>posts de personnalités politiques analysés</span></a>
+      <a class="choc-tuile choc-rouge" href="#/posts?statut=faux"><b>${st.faux.length.toLocaleString('fr-FR')}</b><span>contiennent une fausse information${st.posts.length ? ` (${pct(st.faux.length, st.posts.length)} %)` : ''}</span></a>
+      <a class="choc-tuile" href="${st.theme ? `#/posts?statut=faux&theme=${encodeURIComponent(st.theme[0])}` : '#/posts?statut=faux'}"><b>${esc(nomTheme) || '–'}</b><span>${st.theme ? `le thème le plus touché par la désinformation (${st.theme[1]} post${st.theme[1] > 1 ? 's' : ''})` : 'thème le plus touché par la désinformation'}</span></a>
+    </div>
+    <h2 class="titre-section">Les plus présents dans les médias</h2>
+    <div class="deux">
+      <div class="carte"><h3>Télévision et radio</h3>
+        ${st.antenne.slice(0, 10).map(([id, sec, nom]) => id ? ligneP(id, `<b>${heures(sec)}</b>`) : nonSuivi(nom, `<b>${heures(sec)}</b>`)).join('')}
+        <p class="mention">Temps de parole relevé par l'Arcom${periodeArcom ? `, ${periodeArcom}` : ''}.</p></div>
+      <div class="carte"><h3>Presse écrite</h3>
+        ${st.presse.slice(0, 10).map(([id, n]) => ligneP(id, `<b>${n}</b><br><span class="muet petit">article${n > 1 ? 's' : ''}</span>`)).join('') || '<p class="muet petit">Pas encore de relevé.</p>'}
+        <p class="mention">Articles de presse qui citent la personnalité${st.moisPresse.length ? `, ${fdate(st.moisPresse[0])} – ${fdate(st.moisPresse.at(-1))}` : ''}.</p></div>
+    </div>`;
+}
+
+// Tous les posts analysés, du plus récent au plus ancien, avec un halo selon le verdict.
+const PAR_PAGE_POSTS = 30;
+async function vuePosts(v) {
+  v.innerHTML = '<p class="vide-etat">Chargement…</p>';
+  const tous = S.postsPublics || (S.postsPublics = await api('/api/posts'));
+  const q = S.requete;
+  const statut = q.get('statut') || '', theme = q.get('theme') || '', qui = q.get('personne') || '';
+  const parti = q.get('parti') || '', media = q.get('media') || '';
+  const themesPost = Object.fromEntries((S.d.posts_ia || []).map(l => [l[3], l[4] || []]));
+  // Parti ou média (rédaction, ou groupe propriétaire et toutes ses rédactions) de l'auteur.
+  const dans = (pe, ens) => !!pe && membresDe(ens).includes(pe.parti);
+  const filtre = p => (!theme || (themesPost[p.cle] || []).includes(theme)) && (!qui || p.personne === qui)
+    && (!parti || dans(S.pers[p.personne], parti)) && (!media || dans(S.pers[p.personne], media));
+  const vis = tous.filter(p => (!statut || p.statut === statut) && filtre(p));
+  const lien = (k, val) => { const r = new URLSearchParams(q); val ? r.set(k, val) : r.delete(k); r.delete('page'); const t = r.toString(); return '#/posts' + (t ? '?' + t : ''); };
+  const nb = st => tous.filter(p => p.statut === st && filtre(p)).length;
+  // Listes des filtres : seulement ce qui a des posts analysés.
+  const auteurs = [...new Set(tous.map(p => p.personne))].map(i => S.pers[i]).filter(Boolean);
+  const themesDispo = [...new Set(tous.flatMap(p => themesPost[p.cle] || []))].sort((a, b) => (S.d.theme_noms[a] || a).localeCompare(S.d.theme_noms[b] || b));
+  const partisDispo = S.d.partis.filter(x => !estCollectifMedia(x.id) && auteurs.some(pe => pe.parti === x.id));
+  const mediasDispo = (S.d.groupes_medias || []).flatMap(g => [g, ...g.medias.map(m => S.partis[m]).filter(Boolean)])
+    .filter(x => auteurs.some(pe => membresDe(x.id).includes(pe.parti)));
+  const choix = (k, val, defaut, options) => `<select data-filtre="${k}"><option value="">${defaut}</option>${options.map(([v2, n]) => `<option value="${esc(v2)}"${v2 === val ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
+  const VERDICT = {
+    exact: ['Exact', 'vert'], trompeur: ['Trompeur', 'rouge'], mensonger: ['Faux', 'rouge'],
+    non_etaye: ['Non étayé', 'orange'], insuffisant: ['Invérifiable', 'orange'],
+  };
+  const carte = p => {
+    const pe = S.pers[p.personne], pa = pe && (S.partis[pe.parti] || S.partis.autres);
+    const [nomSt, coul] = STATUT_POST[p.statut];
+    return `<article class="post halo-${coul}">
+      <div class="post-tete">
+        ${pe ? `<a href="#/p/${pe.id}" class="post-auteur">${pe.image ? `<img src="${esc(pe.image)}" alt="" loading="lazy">` : `<span class="ini">${esc(initiales(pe))}</span>`}<b>${esc(pe.nom)}</b></a><span class="muet petit">${esc(pa.sigle)}</span>` : ''}
+        <span class="muet petit">${fdate(p.date)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">voir le post</a></span>
+        <span class="etiquette-statut ${coul}">${nomSt}</span>
+      </div>
+      <div class="post-texte">${esc(p.texte)}</div>
+      ${p.affirmations.map(a => {
+        const [nv, cv] = VERDICT[a.verdict] || VERDICT.insuffisant;
+        return `<div class="post-aff">
+          <span class="etiquette-statut ${cv}">${nv}</span> <b>${esc(a.affirmation)}</b>${a.public ? ' <span class="muet petit">· source apportée par le public</span>' : a.valide ? ' <span class="muet petit">· vérifié par l\'équipe</span>' : ''}
+          ${a.explication ? `<div class="petit">${esc(a.explication.replace(/^Le modèle penchait[^:]*: /, '').replace(/\s*\[[\d,\s\]\[]+\]/g, ''))}</div>` : ''}
+          ${a.passage ? `<blockquote class="petit">« ${esc(a.passage)} »</blockquote>` : ''}
+          ${a.sources.length ? `<div class="petit muet">Sources : ${a.sources.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.public ? x.titre : x.origine.replace(/^(Presse|Web) · /, ''))}</a>`).join(', ')}</div>` : ''}
+          ${a.verdict === 'insuffisant' && !a.valide && CONTRIBUER ? formContribution(p.cle, a.i) : ''}
+        </div>`;
+      }).join('')}
+      ${CONTACT ? `<div class="post-pied"><a class="petit" href="mailto:${esc(CONTACT)}?subject=${encodeURIComponent('Erreur sur un verdict : ' + p.cle)}&body=${encodeURIComponent(p.url + '\n\nCe qui est faux, et la source qui le montre :\n')}">Signaler une erreur</a></div>` : ''}
+    </article>`;
+  };
+  const page = +(q.get('page') || 1);
+  v.innerHTML = `
+    <div class="entete"><div><h1>Posts</h1>
+      <div class="muet petit">Posts des personnalités suivies, découpés en affirmations et confrontés aux sources, du plus récent au plus ancien${qui && S.pers[qui] ? ` · ${esc(S.pers[qui].nom)} <a href="${lien('personne', '')}">(tous)</a>` : ''}</div></div>
+      <div class="segments">
+        <a class="${!statut ? 'actif' : ''}" href="${lien('statut', '')}">Tous</a>
+        <a class="${statut === 'faux' ? 'actif' : ''}" href="${lien('statut', 'faux')}">Invalidés (${nb('faux')})</a>
+        <a class="${statut === 'inverifiable' ? 'actif' : ''}" href="${lien('statut', 'inverifiable')}">Invérifiables (${nb('inverifiable')})</a>
+        <a class="${statut === 'correct' ? 'actif' : ''}" href="${lien('statut', 'correct')}">Validés (${nb('correct')})</a>
+      </div>
+    </div>
+    <div class="filtres-posts">
+      ${choix('theme', theme, 'Tous les thèmes', themesDispo.map(t => [t, S.d.theme_noms[t] || t]))}
+      ${choix('parti', parti, 'Tous les partis', partisDispo.map(x => [x.id, x.nom]))}
+      ${choix('media', media, 'Tous les médias', mediasDispo.map(x => [x.id, S.groupesMedias?.[x.id] ? 'Groupe ' + x.nom : x.nom]))}
+    </div>
+    <p class="avertissement">Verdicts établis automatiquement par une intelligence artificielle à partir des sources citées. Des erreurs sont possibles : elles sont corrigées dès qu'elles sont signalées.</p>
+    <div class="liste-posts">${vis.slice(0, page * PAR_PAGE_POSTS).map(carte).join('') || '<p class="vide-etat">Aucun post analysé pour ce filtre.</p>'}</div>
+    ${vis.length > page * PAR_PAGE_POSTS ? `<p style="text-align:center"><a class="bouton" href="#/posts?${(() => { const r = new URLSearchParams(q); r.set('page', String(page + 1)); return r.toString(); })()}">Voir plus de posts</a></p>` : ''}`;
+  v.querySelectorAll('select[data-filtre]').forEach(sel => sel.onchange = () => { location.hash = lien(sel.dataset.filtre, sel.value); });
+  brancherContributions(v);
+}
+
+// ---------- Contributions sourcées du public ----------
+// Sur une affirmation invérifiable, le public peut apporter une source : son verdict, le lien et la
+// phrase qui le prouve. Rien n'est publié directement : la source est vérifiée, puis la contribution
+// acceptée ou rejetée. En ligne, l'envoi passe par le service Cloudflare (anti-robots Turnstile).
+const CONTRIBUER = STATIQUE ? window.CONTRIBUTIONS : { url: '' };
+function formContribution(cle, i) {
+  return `<details class="contribuer" data-cle="${esc(cle)}" data-i="${i}"><summary>Apporter une source</summary>
+    <form>
+      <p class="petit muet">Vous connaissez une source fiable qui permet de trancher ? Elle sera vérifiée avant publication.</p>
+      <div class="segments" role="radiogroup">${[['exact', 'Exact'], ['faux', 'Faux'], ['trompeur', 'Trompeur']].map(([k, n], j) =>
+        `<label><input type="radio" name="verdict" value="${k}"${j ? '' : ' required'}> ${n}</label>`).join('')}</div>
+      <input name="url" type="url" required placeholder="Lien de la source (article, document officiel, données…)">
+      <textarea name="passage" required minlength="20" rows="3" placeholder="Recopiez la phrase de la source qui le prouve"></textarea>
+      <textarea name="commentaire" rows="2" placeholder="Commentaire (facultatif)"></textarea>
+      <div class="turnstile"></div>
+      <div class="rangee"><button type="submit" class="principal" style="flex:none">Envoyer</button><span class="petit retour"></span></div>
+    </form></details>`;
+}
+let turnstilePret = null;
+function chargerTurnstile() {
+  return turnstilePret = turnstilePret || new Promise((ok, ko) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    sc.onload = () => ok(window.turnstile); sc.onerror = ko;
+    document.head.appendChild(sc);
+  });
+}
+function brancherContributions(v) {
+  v.querySelectorAll('details.contribuer').forEach(det => {
+    const form = det.querySelector('form'), retour = det.querySelector('.retour');
+    let widget = null;
+    det.addEventListener('toggle', async () => {
+      if (!det.open || widget !== null || !STATIQUE) return;
+      widget = (await chargerTurnstile()).render(det.querySelector('.turnstile'), { sitekey: CONTRIBUER.turnstile, language: 'fr' });
+    });
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const f = new FormData(form);
+      const corps = { cle: det.dataset.cle, i: +det.dataset.i, verdict: f.get('verdict'), url: f.get('url'),
+        passage: f.get('passage'), commentaire: f.get('commentaire') };
+      retour.textContent = 'Envoi…';
+      try {
+        let r;
+        if (STATIQUE) {
+          corps.jeton = window.turnstile?.getResponse(widget) || '';
+          r = await fetch(CONTRIBUER.url.replace(/\/$/, '') + '/contribution', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) }).then(x => x.json());
+        } else {
+          r = await fetch('/api/contribution', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) }).then(x => x.json());
+        }
+        if (r.erreur) throw new Error(r.erreur);
+        form.innerHTML = `<p class="petit">${r.deja ? 'Cette source avait déjà été proposée pour cette affirmation.' : 'Merci ! Votre source sera vérifiée avant publication.'}</p>`;
+      } catch (err) {
+        retour.textContent = 'Échec : ' + err.message;
+        if (STATIQUE && widget !== null) window.turnstile?.reset(widget);
+      }
     };
   });
-  const pers = id => S.pers[id];
-  const ligneP = (id, droite) => {
-    const p = pers(id), pa = S.partis[p.parti] || S.partis.autres;
-    return `<a class="ligne-p" href="#/p/${id}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : `<span class="ini">${esc(initiales(p))}</span>`}
-      <span class="nom">${esc(p.nom)}<span class="muet petit"> · ${esc(pa.sigle)}</span></span><span class="droite">${droite}</span></a>`;
-  };
-  const absents = [...st.deputes].sort((a, b) => a[1].sol - b[1].sol).slice(0, 5);
-  const topMensonges = Object.entries(st.parPers).sort((a, b) => b[1].n - a[1].n).slice(0, 5);
-  const topAff = Object.entries(st.parAff).sort((a, b) => b[1].n - a[1].n).slice(0, 5);
-  const periodeArcom = st.dernier.length ? `${fdate(st.dernier[0])} – ${fdate(st.dernier.at(-1))}` : '';
-  const hero = st.fx.length ? `
-      <div class="hero-chiffre">${st.fx.length.toLocaleString('fr-FR')} fois</div>
-      <p class="hero-texte"><b>${st.auteurs.length} personnalité${st.auteurs.length > 1 ? 's' : ''} politique${st.auteurs.length > 1 ? 's ont' : ' a'}</b> répété des informations démenties, ${st.fx.length} fois au total${st.apres ? `, dont <b>${st.apres} sans jamais les corriger</b>` : ''}.</p>
-      ${st.porteeAuteurs ? `<p class="hero-sous">Leurs comptes totalisent ${nbCourt(st.porteeAuteurs)} abonnés.</p>` : ''}`
-    : `
-      <div class="hero-chiffre">${st.solMed != null ? pct(1 - st.solMed, 1) + ' %' : '–'}</div>
-      <p class="hero-texte">des grands votes de l'Assemblée se font sans le député médian. <b>${st.moitie} députés</b> manquent plus d'un grand vote sur deux.</p>
-      <p class="hero-sous">Grands votes : les votes solennels, sur l'ensemble d'un texte, annoncés à l'avance. Un vote confié à un collègue compte comme une absence.</p>`;
-  v.innerHTML = `
-    <section class="hero">${hero}</section>
-    <div class="chocs">
-      <div class="choc-tuile"><b>${st.apres || 0}</b><span>fausses informations répétées ou laissées en ligne malgré un démenti public</span></div>
-      ${st.fx.length ? `<div class="choc-tuile"><b>${st.moitie}</b><span>députés manquent plus d'un grand vote sur deux</span></div>`
-        : `<div class="choc-tuile"><b>${st.muets}</b><span>députés n'ont jamais pris la parole dans l'hémicycle en six mois de mandat ou plus</span></div>`}
-      <div class="choc-tuile"><b>${st.totalAntenne ? pct(st.top10, st.totalAntenne) + ' %' : '–'}</b><span>du temps de parole des politiques à la télé et à la radio est pris par 10 personnalités${periodeArcom ? ` (${periodeArcom})` : ''}</span></div>
-      ${st.c.n >= SEUIL ? `<div class="choc-tuile"><b>${pct(nonFiables(st.c), st.c.n)} %</b><span>des propos vérifiés sont faux, trompeurs ou non étayés — faux ou trompeurs</span></div>`
-        : `<div class="choc-tuile"><b>${Math.round(st.totalAntenne / 3600).toLocaleString('fr-FR')} h</b><span>de temps de parole des politiques à la télé et à la radio en 3 mois${periodeArcom ? ` (${periodeArcom})` : ''}</span></div>`}
-    </div>
-    <div class="deux">
-      <div class="carte"><h3>Les affirmations mensongères les plus répétées</h3>
-        ${topAff.length ? topAff.map(([aid, x]) => `<a class="ligne-aff" href="#/affirmation/${aid}"><span class="citation">${esc(S.d.registre_noms[aid] || '')}</span><span class="droite"><b class="rouge">${x.n} fois</b><br><span class="muet petit">${x.elus.size} élu${x.elus.size > 1 ? 's' : ''}</span></span></a>`).join('')
-          : `<p class="muet petit">Aucune répétition confirmée pour l'instant. <a href="#/affirmations">Voir les affirmations suivies</a>.</p>`}</div>
-      <div class="carte"><h3>Ceux qui les répètent le plus</h3>
-        ${topMensonges.length ? topMensonges.map(([id, x]) => ligneP(id, `<b class="rouge">${x.n} fois</b>${x.apres ? `<br><span class="muet petit">${x.apres} malgré le démenti</span>` : ''}`)).join('')
-          : '<p class="muet petit">Aucune répétition confirmée pour l\'instant.</p>'}</div>
-    </div>
-    <div class="deux">
-      <div class="carte"><h3>Les plus absents aux grands votes</h3>
-        ${absents.map(([id, r]) => ligneP(id, `<b>${pct(1 - r.sol, 1)} %</b><br><span class="muet petit">de ${r.solennels} votes manqués</span>`)).join('')}
-        <p class="mention">Votes solennels depuis la prise de fonction ; un vote confié à un collègue compte comme une absence. Une absence peut être justifiée (maladie, mission, congé).</p></div>
-      <div class="carte"><h3>Les plus présents à la télé et à la radio</h3>
-        ${st.antenne.slice(0, 5).map(([id, sec, nom]) => id ? ligneP(id, `<b>${heures(sec)}</b>`)
-          : `<div class="ligne-p"><span class="ini">${esc(nom.split(' ').map(x => x[0]).join('').slice(0, 2))}</span><span class="nom">${esc(nom.split(' ').slice(1).join(' ') + ' ' + nom.split(' ')[0].charAt(0) + nom.split(' ')[0].slice(1).toLowerCase())}<span class="muet petit"> · non suivi</span></span><span class="droite"><b>${heures(sec)}</b></span></div>`).join('')}
-        <p class="mention">Temps de parole relevé par l'Arcom${periodeArcom ? `, ${periodeArcom}` : ''}.</p></div>
-    </div>
-    <div class="carte"><h3>Cette semaine</h3>
-      <div class="chiffres" style="margin-top:8px">
-        <div class="chiffre"><b>${st.semaineFx}</b><span>répétitions confirmées</span></div>
-        <div class="chiffre"><b>${st.semaineV}</b><span>nouveaux verdicts</span></div>
-        <div class="chiffre"><b>${S.d.a_qualifier.length}</b><span>articles de vérification à lire</span></div>
-      </div></div>`;
 }
 
 // ---------- Atelier ----------
@@ -1382,6 +1505,7 @@ async function vueAtelier(v, sous, arg) {
     <div class="onglets-page">
       <a href="#/atelier" class="${!sous ? 'actif' : ''}">À trier${n ? ` (${n})` : ''}</a>
       <a href="#/atelier/verifier" class="${sous === 'verifier' ? 'actif' : ''}">À vérifier</a>
+      <a href="#/atelier/contributions" class="${sous === 'contributions' ? 'actif' : ''}">Contributions</a>
       <a href="#/atelier/registre" class="${sous === 'registre' ? 'actif' : ''}">Registre</a>
       <a href="#/atelier/intervenants" class="${sous === 'intervenants' ? 'actif' : ''}">Intervenants médias</a>
       <a href="#/atelier/collectes" class="${sous === 'collectes' ? 'actif' : ''}">Collectes</a>
@@ -1390,6 +1514,7 @@ async function vueAtelier(v, sous, arg) {
   const zone = $('#atelier');
   if (sous === 'registre') return vueRegistre(zone, arg);
   if (sous === 'verifier') return vueVerifier(zone);
+  if (sous === 'contributions') return vueContributions(zone);
   if (sous === 'collectes') return vueReglages(zone);
   if (sous === 'intervenants') return vueIntervenants(zone);
   return vueATrier(zone);
@@ -1402,27 +1527,181 @@ const CHOIX_VERIF = [
   ['non_etaye', 'Non étayé', '--v-non-etaye'], ['opinion', 'Opinion présentée comme un fait', '--t-opinion'],
   ['ignore', 'Rien à vérifier', '--v-inverifiable'],
 ];
-async function vueVerifier(v) {
-  const qui = S.requete.get('personne') || '';
+// Résultat du contrôle automatique d'une phrase : citation comparée aux propos d'origine,
+// ou chiffre comparé aux valeurs officielles. Renvoie [html, note proposée, source proposée].
+const STATUT_CITATION = {
+  exacte: ['Citation exacte', '--v-vrai'], deformee: ['Citation déformée', '--v-faux'],
+  presse: ['Rapportée par la presse', '--v-inverifiable'], introuvable: ['Propos d\'origine introuvable', '--v-trompeur'],
+};
+const nbFr = (x, u) => u === 'nombre' ? Math.round(x).toLocaleString('fr-FR')
+  : x.toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + (u === '%' ? ' %' : ' ' + u);
+function blocControle(c) {
+  if (!c) return ['', '', ''];
+  if (c.type === 'citation') {
+    const x = c.citations.find(y => y.statut === c.statut) || c.citations[0];
+    const [nom, coul] = STATUT_CITATION[x.statut];
+    const qui = x.cites.map(p => `<a href="#/p/${p.id}">${esc(p.nom)}</a>`).join(', ');
+    let h = `<div class="controle" style="border-color:var(${coul})"><span class="etiquette" style="background:var(${coul})">${nom}</span>
+      <span class="petit">Mots prêtés à ${qui} : « ${esc(x.passage)} »</span>`;
+    const o = x.original;
+    if (o) h += `<div class="petit" style="margin-top:6px">Propos d'origine (${fdate(o.date)}, ${NOM_SOURCE[o.source] || o.source}, ${Math.round(x.score * 100)} % des mots) : « ${esc(o.texte)} » <a href="${esc(o.url)}" target="_blank" rel="noopener">source</a></div>`;
+    (x.articles || []).forEach(a => { h += `<div class="petit" style="margin-top:4px"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.titre)}</a> <span class="muet">${esc(a.origine.replace('Presse · ', ''))}</span></div>`; });
+    if (x.statut === 'introuvable') h += `<div class="petit muet" style="margin-top:4px">Ni dans ce que Beau Discours collecte (pas de télévision ni de radio), ni dans les titres de presse : à chercher à la main.</div>`;
+    const note = x.statut === 'deformee' ? `Les mots prêtés à ${x.cites[0].nom} diffèrent de ses propos du ${fdate(o.date)} : « ${o.texte.slice(0, 300)} »`
+      : x.statut === 'exacte' ? `Citation conforme aux propos du ${fdate(o.date)}.` : '';
+    return [h + '</div>', note, o ? o.url : (x.articles || [])[0]?.url || ''];
+  }
+  const x = c.chiffres.find(y => y.statut === c.statut) || c.chiffres[0];
+  const coul = x.statut === 'ecart' ? '--v-faux' : '--v-vrai';
+  const offi = Object.entries(x.officielles).map(([p, v]) => `${p} : ${nbFr(v, x.unite)}`).join(' · ');
+  const h = `<div class="controle" style="border-color:var(${coul})"><span class="etiquette" style="background:var(${coul})">${x.statut === 'ecart' ? 'Chiffre hors tolérance' : 'Chiffre conforme'}</span>
+    <span class="petit">${esc(x.nom)} : cité ${x.qualificatif ? esc(x.qualificatif) + ' ' : ''}${nbFr(x.cite, x.unite)}${x.annee ? ` (${x.annee})` : ''}</span>
+    <div class="petit" style="margin-top:6px">Valeurs officielles ${x.annee ? 'de ' + x.annee : 'de la période'} : ${offi}</div>
+    <div class="petit muet">Source : ${x.sources.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">Eurostat</a>`).join(', ')}</div></div>`;
+  const note = `${x.nom} : ${nbFr(x.cite, x.unite)} cité, ${nbFr(x.plus_proche, x.unite)} selon Eurostat${x.annee ? ' (' + x.annee + ')' : ''}.`;
+  return [h, note, x.sources[0]];
+}
+
+// Posts analysés par le modèle local : affirmations relevées, sources trouvées, verdict proposé.
+// Le verdict retenu est donné à la main, affirmation par affirmation.
+const NOM_PROPOSITION = {
+  exact: ['Exact', '--v-vrai'], trompeur: ['Trompeur', '--v-trompeur'], mensonger: ['Mensonger', '--v-faux'],
+  non_etaye: ['Non étayé', '--v-non-etaye'], insuffisant: ['Sources insuffisantes', '--v-inverifiable'],
+};
+// Contributions sourcées reçues du public : la source a été ouverte et la phrase cherchée, le modèle a
+// relu l'affirmation avec elle ; la décision reste manuelle.
+async function vueContributions(v) {
   v.innerHTML = '<p class="vide-etat">Chargement…</p>';
-  const d = await api('/api/verifier' + (qui ? '?personne=' + encodeURIComponent(qui) : ''));
+  const liste = await api('/api/contributions');
+  const vue = S.requete.get('vue') || 'a_decider';
+  const vis = liste.filter(c => vue === 'a_decider' ? ['a_decider', 'a_controler'].includes(c.statut) : c.statut === vue);
+  const n = st => liste.filter(c => st.includes(c.statut)).length;
+  const oui = (b, t) => `<span class="etiquette-statut ${b ? 'vert' : 'rouge'}">${t}${b ? '' : ' : non'}</span>`;
   v.innerHTML = `
     <div class="rangee" style="margin-bottom:12px">
-      <p class="muet petit" style="flex:2">${d.total.toLocaleString('fr-FR')} affirmations présentées comme des faits (posts et citations de presse, 120 derniers jours), des comptes les plus suivis aux moins suivis.</p>
+      <div class="segments" style="flex:none">
+        <a class="${vue === 'a_decider' ? 'actif' : ''}" href="#/atelier/contributions">À décider (${n(['a_decider', 'a_controler'])})</a>
+        <a class="${vue === 'accepte' ? 'actif' : ''}" href="#/atelier/contributions?vue=accepte">Acceptées (${n(['accepte'])})</a>
+        <a class="${vue === 'rejete' ? 'actif' : ''}" href="#/atelier/contributions?vue=rejete">Rejetées (${n(['rejete'])})</a>
+      </div>
+      <button id="contrib-recup" style="flex:none">Récupérer et contrôler maintenant</button>
+    </div>
+    ${vis.map(c => {
+      const ct = c.controle || {}, pr = ct.proposition;
+      const pe = c.post && S.pers[c.post.personne];
+      return `<div class="carte" style="margin-bottom:12px" data-id="${esc(c.id)}">
+        <div class="source">${pe ? `<a href="#/p/${pe.id}">${esc(pe.nom)}</a> · ` : ''}${c.post ? `${fdate(c.post.date)} · <a href="${esc(c.post.url)}" target="_blank" rel="noopener">voir le post</a> · ` : ''}reçue le ${fdate((c.recu || '').slice(0, 10))}</div>
+        ${c.post ? `<div class="petit" style="margin:6px 0">${esc(c.post.texte)}</div><div><b>${esc(c.post.affirmation)}</b></div>` : '<p class="rouge">Post introuvable.</p>'}
+        <div style="margin:8px 0">Verdict proposé par le public : <b>${esc(c.verdict)}</b> · <a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a></div>
+        <blockquote class="petit" style="margin:4px 0;padding-left:8px;border-left:2px solid var(--bord)">« ${esc(c.passage)} »</blockquote>
+        ${c.commentaire ? `<div class="petit muet">Commentaire : ${esc(c.commentaire)}</div>` : ''}
+        <div class="rangee" style="justify-content:flex-start;margin:8px 0">${c.statut === 'a_controler' ? '<span class="muet petit">Contrôle en attente…</span>'
+          : `${oui(ct.page_lue, 'Page lue')} ${oui(ct.passage_trouve, 'Phrase trouvée dans la page')}${pr ? ` <span class="petit">Relecture du modèle : <b>${esc(pr.verdict)}</b> (${esc(pr.confiance)}) · ${esc(pr.explication)}</span>` : ''}`}</div>
+        ${['a_decider', 'a_controler'].includes(c.statut) ? `<div class="rangee" style="justify-content:flex-start"><button data-decision="accepte" class="principal" style="flex:none">Accepter</button><button data-decision="rejete" style="flex:none">Rejeter</button></div>` : ''}
+      </div>`;
+    }).join('') || '<p class="vide-etat">Aucune contribution.</p>'}`;
+  $('#contrib-recup').onclick = async () => { await api('/api/contributions/recuperer', {}); setTimeout(() => vueContributions(v), 3000); };
+  v.querySelectorAll('[data-decision]').forEach(b => b.onclick = async () => {
+    const carte = b.closest('[data-id]');
+    await api('/api/contributions/decider', { id: carte.dataset.id, decision: b.dataset.decision });
+    carte.remove(); S.postsPublics = null; charger();
+  });
+}
+
+async function vueAnalysesIA(v, qui, lien) {
+  const d = await api('/api/ia' + (qui ? '?personne=' + encodeURIComponent(qui) : ''));
+  const e = d.etat;
+  v.innerHTML = `
+    <div class="rangee" style="margin-bottom:12px">
+      <div class="segments" style="flex:none"><a class="actif" href="${lien('ia')}">Analyses IA (${d.total.toLocaleString('fr-FR')})</a>${[['citations', 'Citations'], ['chiffres', 'Chiffres'], ['autres', 'Autres']].map(([g, n]) => `<a href="${lien(g)}">${n}</a>`).join('')}</div>
       <input id="verif-qui" list="verif-noms" placeholder="Filtrer par personnalité" value="${esc(S.pers[qui]?.nom || '')}">
       <datalist id="verif-noms">${S.d.personnes.map(p => `<option value="${esc(p.nom)}">`).join('')}</datalist>
     </div>
+    <div class="rangee" style="margin-bottom:8px">
+      <p class="muet petit" style="flex:2">Le modèle local (${esc(d.modele)}) relève les affirmations vérifiables de chaque post, rassemble des sources et propose un verdict d'après elles seules. À toi de trancher. Les propositions les plus graves d'abord.
+        ${!d.disponible ? '<b class="rouge">Ollama ne répond pas.</b>' : e.en_cours ? `<b>Analyse en cours : ${e.fait} / ${e.lot} posts (recharge la page pour suivre).</b>` : e.erreur ? `<b class="rouge">${esc(e.erreur)}</b>` : ''}</p>
+      <button id="ia-lancer" style="flex:none" ${e.en_cours || !d.disponible ? 'disabled' : ''}>Analyser 50 posts de plus</button>
+    </div>
+    ${d.posts.map(p => {
+      const pers = S.pers[p.personne];
+      return `<div class="carte" style="margin-bottom:12px">
+        <div class="source">${pers ? `<a href="#/p/${pers.id}">${esc(pers.nom)}</a> · ${esc((S.partis[pers.parti] || {}).sigle || '')} · ` : ''}${fdate(p.date)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">voir le post</a></div>
+        <div style="margin:8px 0">${esc(p.texte)}</div>
+        ${p.affirmations.map((a, i) => {
+          if (a.traite) return '';
+          const [nom, coul] = NOM_PROPOSITION[a.proposition.verdict] || NOM_PROPOSITION.insuffisant;
+          const cites = a.proposition.sources.map(n => a.sources_trouvees[n - 1]).filter(Boolean);
+          const autres = a.sources_trouvees.filter(s => !cites.includes(s));
+          const src = s => `<div class="petit"><span class="puce">${esc(s.origine)}</span> <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.titre)}</a></div>`;
+          return `<div class="controle ia-aff" data-cle="${esc(p.cle)}" data-i="${i}" data-phrase="${a.phrase}" style="border-color:var(${coul})">
+            <span class="etiquette" style="background:var(${coul})">${nom}</span><span class="petit muet">confiance ${esc(a.proposition.confiance)} · ${esc(a.type)}</span>
+            <div style="margin:6px 0"><b>${esc(a.affirmation)}</b></div>
+            <div class="petit">${esc(a.proposition.explication)}</div>
+            ${a.proposition.passage && a.proposition.verdict !== 'insuffisant' ? `<blockquote class="petit" style="margin:6px 0;padding-left:8px;border-left:2px solid var(--bord)">« ${esc(a.proposition.passage)} » <span class="muet">[source ${a.proposition.source_passage}]</span></blockquote>` : ''}
+            ${cites.map(src).join('')}
+            ${autres.length ? `<details class="petit"><summary>${autres.length} autre${autres.length > 1 ? 's' : ''} source${autres.length > 1 ? 's' : ''} lue${autres.length > 1 ? 's' : ''}</summary>${autres.map(src).join('')}</details>` : ''}
+            <div class="rangee" style="margin-top:6px">
+              <input name="note" value="${esc(a.proposition.verdict === 'insuffisant' ? '' : a.proposition.explication.replace(/\s*\[[\d,\s\]\[]+\]/g, ''))}" placeholder="Justification">
+              <input name="source_url" value="${esc(cites[0]?.url || '')}" placeholder="Lien de la source retenue">
+            </div>
+            <div class="choix-verdict" style="margin-top:6px">${CHOIX_VERIF.map(([k, n, c]) => `<button data-verdict="${k}" style="border-color:var(${c})">${n}</button>`).join('')}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }).join('') || `<p class="vide-etat">${e.en_cours ? 'Première analyse en cours…' : 'Aucune analyse en attente. Lance une analyse ci-dessus.'}</p>`}`;
+  const champ = $('#verif-qui');
+  champ.onchange = () => {
+    const p = S.d.personnes.find(x => norm(x.nom) === norm(champ.value));
+    location.hash = '#/atelier/verifier?genre=ia' + (p ? '&personne=' + p.id : '');
+  };
+  $('#ia-lancer').onclick = async () => { await api('/api/ia/lancer', { n: 50 }); vueAnalysesIA(v, qui, lien); };
+  v.querySelectorAll('.ia-aff').forEach(bloc => bloc.querySelectorAll('[data-verdict]').forEach(b => b.onclick = async () => {
+    const verdict = b.dataset.verdict;
+    const note = bloc.querySelector('[name=note]').value, source_url = bloc.querySelector('[name=source_url]').value;
+    if (['exact', 'trompeur', 'mensonger'].includes(verdict) && !source_url) return alert('Indique la source qui fonde ce verdict.');
+    // Le verdict porte sur la phrase du post qui contient l'affirmation.
+    if (verdict !== 'ignore') await api('/api/verifier/juger', { id: bloc.dataset.phrase, verdict, note, source_url });
+    await api('/api/ia/traiter', { cle: bloc.dataset.cle, i: +bloc.dataset.i, verdict });
+    if (verdict === 'mensonger' && confirm('Ajouter aussi cette affirmation au registre, pour suivre ses répétitions ?'))
+      location.hash = '#/atelier/registre/nouveau?texte=' + encodeURIComponent(bloc.querySelector('b').textContent);
+    bloc.remove();
+    charger();
+  }));
+}
+
+async function vueVerifier(v) {
+  const qui = S.requete.get('personne') || '';
+  const genre = S.requete.get('genre') || 'ia';
+  v.innerHTML = '<p class="vide-etat">Chargement…</p>';
+  const lien = g => '#/atelier/verifier?genre=' + g + (qui ? '&personne=' + qui : '');
+  if (genre === 'ia') return vueAnalysesIA(v, qui, lien);
+  const d = await api('/api/verifier?genre=' + genre + (qui ? '&personne=' + encodeURIComponent(qui) : ''));
+  const explication = {
+    citations: 'Mots prêtés entre guillemets à une personnalité suivie, comparés à ses propos d\'origine. Les plus suspects d\'abord.',
+    chiffres: 'Chiffres d\'indicateurs officiels (chômage, inflation, dette, déficit, croissance, pauvreté, titres de séjour, asile), comparés aux valeurs Eurostat de la période. Les écarts d\'abord.',
+    autres: 'Le reste des affirmations présentées comme des faits, des comptes les plus suivis aux moins suivis.',
+  }[genre];
+  v.innerHTML = `
+    <div class="rangee" style="margin-bottom:12px">
+      <div class="segments" style="flex:none"><a href="${lien('ia')}">Analyses IA</a>${[['citations', 'Citations'], ['chiffres', 'Chiffres'], ['autres', 'Autres']].map(([g, n]) =>
+        `<a class="${g === genre ? 'actif' : ''}" href="${lien(g)}">${n} (${d.effectifs[g].toLocaleString('fr-FR')})</a>`).join('')}</div>
+      <input id="verif-qui" list="verif-noms" placeholder="Filtrer par personnalité" value="${esc(S.pers[qui]?.nom || '')}">
+      <datalist id="verif-noms">${S.d.personnes.map(p => `<option value="${esc(p.nom)}">`).join('')}</datalist>
+    </div>
+    <p class="muet petit">${explication} Posts et citations de presse depuis 2022${d.maj ? ` · contrôles du ${fdate(d.maj.slice(0, 10))}` : ''}.</p>
     ${d.file.map(r => {
       const p = S.pers[r.personne];
       const ctx = esc(r.contexte || r.texte).replace(esc(r.texte), `<mark>${esc(r.texte)}</mark>`);
+      const [controle, note, source] = blocControle(r.controle);
       return `<div class="carte verif" data-id="${r.id}" style="margin-bottom:12px">
         <div class="source">${p ? `<a href="#/p/${p.id}">${esc(p.nom)}</a> · ${esc((S.partis[p.parti] || {}).sigle || '')} · ` : ''}${r.portee ? nbCourt(r.portee) + ' abonnés · ' : ''}${fdate(r.date)} · ${NOM_SOURCE[r.source] || r.source} · <a href="${esc(r.url)}" target="_blank" rel="noopener">voir</a></div>
         <div style="margin:8px 0">${ctx}</div>
+        ${controle}
         <div class="rangee" style="justify-content:flex-start"><button data-sources style="flex:none">Chercher des sources</button></div>
         <div class="resultats"></div>
         <div class="rangee">
-          <input name="note" placeholder="Justification (ce que disent les sources)">
-          <input name="source_url" placeholder="Lien de la source retenue">
+          <input name="note" placeholder="Justification (ce que disent les sources)" value="${esc(note)}">
+          <input name="source_url" placeholder="Lien de la source retenue" value="${esc(source)}">
         </div>
         <div class="choix-verdict" style="margin-top:8px">${CHOIX_VERIF.map(([k, n, c]) => `<button data-verdict="${k}" style="border-color:var(${c})">${n}</button>`).join('')}</div>
       </div>`;
@@ -1430,7 +1709,7 @@ async function vueVerifier(v) {
   const champ = $('#verif-qui');
   champ.onchange = () => {
     const p = S.d.personnes.find(x => norm(x.nom) === norm(champ.value));
-    location.hash = '#/atelier/verifier' + (p ? '?personne=' + p.id : '');
+    location.hash = '#/atelier/verifier?genre=' + genre + (p ? '&personne=' + p.id : '');
   };
   v.querySelectorAll('.verif').forEach(carte => {
     const id = carte.dataset.id;
@@ -1552,14 +1831,22 @@ function vueMentions(v) {
     <p>GitHub Inc. (GitHub Pages), 88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, États-Unis.</p>
     <h2>Droit de réponse</h2>
     <p>Toute personne nommée ou désignée sur ce site peut exercer son droit de réponse (article 6-IV de la loi du 21 juin 2004), dans les trois mois suivant la mise en ligne du contenu, en écrivant à ${mail}. La demande indique les références du contenu (lien de la page), les passages contestés et le texte de la réponse. La réponse est publiée gratuitement dans les trois jours suivant sa réception, à la suite du contenu concerné.</p>
-    <p>Pour signaler une erreur ou une source erronée sans exercer ce droit, chaque affirmation a un bouton « Signaler ». Chaque signalement est vérifié à la main.</p>
+    <p>Pour signaler une erreur ou une source erronée sans exercer ce droit, chaque post analysé a un lien « Signaler une erreur ». Chaque signalement est vérifié à la main, et l'erreur corrigée.</p>
+    <h2>Verdicts automatiques</h2>
+    <p>Les verdicts portés sur les posts sont établis par un traitement automatisé (un modèle de langage) qui confronte une affirmation publique aux sources publiées citées à côté d'elle. Ils peuvent contenir des erreurs. Un verdict qualifie une affirmation au regard de ces sources ; il ne porte aucun jugement sur les intentions de son auteur. La méthode est décrite dans la page <a href="#/methode">Méthode</a>.</p>
     <h2>Données personnelles</h2>
     <p>Le site ne dépose aucun cookie et ne mesure pas l'audience. Le navigateur garde seulement vos préférences d'affichage (période, onglets), sur votre appareil. Les personnalités présentées sont des élus et responsables politiques ; seules des informations publiques liées à leur activité politique sont reprises, avec leur source.</p>
+    <h2>Contributions du public</h2>
+    <p>Quand vous apportez une source, sont conservés : l'affirmation concernée, le verdict proposé, le lien, la phrase recopiée, votre commentaire éventuel et la date. Aucun nom ni adresse électronique n'est demandé, et l'adresse IP n'est pas conservée : seule une empreinte chiffrée, qui change chaque jour et ne permet pas de remonter à vous, sert à limiter le nombre d'envois par appareil. Ces données servent uniquement à vérifier la source et, si elle est acceptée, à la publier avec le verdict. Les contributions sont reçues par un service hébergé par Cloudflare, Inc. (101 Townsend Street, San Francisco, CA 94107, États-Unis).</p>
+    <p>Pour bloquer les robots, le formulaire charge, quand vous l'ouvrez, le service Turnstile de Cloudflare, qui analyse des signaux techniques de votre navigateur (voir la politique de confidentialité de Cloudflare). Il n'est chargé que si vous ouvrez le formulaire. Pour faire supprimer une contribution, écrivez à ${mail} en indiquant le post et le lien de la source.</p>
     <h2>Sources et licences</h2>
     <ul>
       <li>Assemblée nationale : données ouvertes (députés, comptes rendus de séance, scrutins), Licence Ouverte.</li>
       <li>Wikidata (parcours, partis, formation, comptes) : CC0.</li>
       <li>Arcom : relevés publics du temps de parole des personnalités politiques.</li>
+      <li>Eurostat : statistiques officielles, réutilisation libre avec mention de la source.</li>
+      <li>Posts des personnalités : reproduits pour en permettre la vérification, avec un lien vers la publication d'origine.</li>
+      <li>Extraits d'articles de presse et de pages web : courtes citations à des fins d'information et de vérification (article L. 122-5 du code de la propriété intellectuelle), avec le nom de la source et un lien vers l'original.</li>
       <li>Photos : Wikimedia Commons, sous la licence indiquée sur la page de chaque fichier (lien sous chaque photo).</li>
       <li>Articles et vérifications : liens vers les publications d'origine (presse, fact-checkers), qui restent la propriété de leurs auteurs.</li>
     </ul>
@@ -1570,10 +1857,33 @@ function vueMentions(v) {
 function vueMethode(v) {
   v.innerHTML = `<div class="methode">
     <h1>Méthode</h1>
-    <h2>Qui juge</h2>
-    <p>Beau Discours ne rend aucun verdict lui-même. Les verdicts viennent des fact-checkers professionnels : via l'API Google Fact Check (AFP Factuel, Les Décodeurs, CheckNews, franceinfo…) ou qualifiés à la main depuis leurs articles. Chaque verdict renvoie à l'article source.</p>
-    <h2>Les quatre verdicts</h2>
-    <p>Les notes libres des fact-checkers sont ramenées à : <b>vrai</b> (vrai, plutôt vrai, exact), <b>trompeur</b> (exagéré, manque de contexte, c'est plus compliqué, partiellement faux), <b>faux</b> (faux, infondé, inexact, intox) et <b>invérifiable</b>. La note d'origine reste affichée.</p>
+    <h2>Comment un post est vérifié</h2>
+    <ol>
+      <li><b>Collecte.</b> Les posts des personnalités suivies sont relevés sur les réseaux sociaux (voir plus bas). Ceux qui ne sont pas des prises de parole (agenda, annonces de passages dans les médias, appels à partager, remerciements, vœux) sont écartés : ils ne sont ni comptés ni analysés.</li>
+      <li><b>Découpage.</b> Chaque post est découpé en affirmations vérifiables : un chiffre, un fait, un événement, des mots prêtés à quelqu'un, ou une position prêtée à une autre personne (« X veut supprimer… »). Une opinion ne se vérifie pas, mais les faits sur lesquels elle s'appuie oui : dans « ce budget est une saignée : 4 milliards de coupes », seuls les 4 milliards sont vérifiés. Quand l'auteur donne sa propre estimation comme un fait, c'est la fiabilité de cette estimation qui est vérifiée. Quand il prête une position à quelqu'un, c'est le fait que cette personne l'ait réellement exprimée qui est vérifié, pas la justesse de son idée.</li>
+      <li><b>Recherche des sources.</b> Pour chaque affirmation : valeurs officielles (Eurostat) quand elle porte sur un chiffre suivi, propos d'origine de la personne citée dans tout ce que Beau Discours a collecté, articles de presse et pages web dont le texte est lu, Wikipédia.</li>
+      <li><b>Verdict.</b> Un modèle de langage, qui fonctionne sur un ordinateur de Beau Discours sans service extérieur, compare l'affirmation aux sources trouvées, et à elles seules. Pour conclure, il doit recopier mot pour mot le passage de la source qui fonde son verdict ; un programme vérifie que ce passage existe bien dans la source. Sans passage valable, l'affirmation est déclarée invérifiable. Qu'une source ne parle pas d'une affirmation n'en fait jamais une fausse information.</li>
+      <li><b>Relecture.</b> Les verdicts peuvent être relus et corrigés à la main ; ils portent alors la mention « vérifié par l'équipe ».</li>
+    </ol>
+    <h2>Les verdicts</h2>
+    <ul>
+      <li><b>Exact</b> : une source confirme l'affirmation.</li>
+      <li><b>Faux</b> : une source la contredit explicitement.</li>
+      <li><b>Trompeur</b> : vraie en partie, exagérée, ou présentée de façon à induire en erreur.</li>
+      <li><b>Non étayé</b> : présentée comme certaine, alors que les sources montrent qu'elle n'est pas établie.</li>
+      <li><b>Invérifiable</b> : aucune source fiable trouvée ne permet de trancher.</li>
+    </ul>
+    <p>Un post est <b>invalidé</b> (halo rouge) s'il contient au moins une affirmation fausse ou trompeuse, <b>validé</b> (halo vert) si toutes ses affirmations sont exactes, et <b>invérifiable</b> (halo orange) sinon. Un post qui ne contient que des opinions n'a pas de verdict.</p>
+    <p><b>Des erreurs sont possibles</b> : le modèle peut mal lire un post ou une source. Chaque post a un lien « Signaler une erreur » ; une erreur signalée est vérifiée et corrigée. </p>
+    <h2>Les sources apportées par le public</h2>
+    <p>Quand aucune source fiable ne permet de trancher, chacun peut en apporter une : sous l'affirmation invérifiable, « Apporter une source » permet de proposer un verdict (exact, faux ou trompeur), le lien de la source et la phrase de cette source qui le prouve. Ce n'est pas un vote : le nombre de contributions ne compte pas, seule la source compte.</p>
+    <p>Chaque contribution est contrôlée : la page est ouverte pour vérifier que la phrase recopiée s'y trouve, et le modèle relit l'affirmation avec cette source. Elle est ensuite acceptée ou rejetée à la main. Une contribution acceptée donne son verdict à l'affirmation, avec la mention « source apportée par le public », et le site de la source est ensuite interrogé en priorité lors des vérifications suivantes. Une même source proposée plusieurs fois pour une même affirmation ne compte qu'une fois, et le nombre d'envois par appareil et par jour est limité.</p>
+    <h2>Score de fiabilité</h2>
+    <p>Le score d'une personnalité vaut 100 moins la part de ses posts analysés qui contiennent une fausse information : si 24 % de ses posts analysés sont invalidés, son score est de 76. Halo vert de 75 à 100, orange de 50 à 75, rouge en dessous de 50. Il n'est affiché qu'à partir de ${MIN_POSTS_SCORE} posts analysés.</p>
+    <p>Le score d'un parti, d'une rédaction ou d'un groupe de médias porte sur l'ensemble des posts analysés de ses membres. Partis et médias sont présentés du plus grand nombre de posts au plus petit.</p>
+    <p>Le score décrit les posts analysés, pas tout ce que dit une personne : les interventions à la télévision et à la radio, notamment, ne sont pas encore vérifiées.</p>
+    <h2>Verdicts des fact-checkers</h2>
+    <p>Les verdicts publiés par les fact-checkers professionnels (AFP Factuel, Les Décodeurs, CheckNews, franceinfo…) sont repris sur les fiches, avec un lien vers l'article. Leurs notes libres sont ramenées à : <b>vrai</b>, <b>trompeur</b> (exagéré, manque de contexte, plus compliqué), <b>faux</b> (infondé, inexact, intox) et <b>invérifiable</b>. La note d'origine reste affichée.</p>
     <h2>Affirmations mensongères répétées</h2>
     <p>Le <a href="#/affirmations">registre</a> rassemble des affirmations mensongères (« La Révolution française a eu lieu en 1515 »), avec ce qui est vrai, des preuves et la date à laquelle le démenti est public. Il se remplit à la main, depuis une phrase de n'importe quel propos, et automatiquement à partir des verdicts « faux » et « trompeur » des fact-checkers.</p>
     <p>Pour chaque affirmation en service, Beau Discours cherche dans tout ce qui a été collecté (séance, réseaux, presse, propos saisis) les phrases qui contiennent ses mots-clés. <b>Aucune ne compte avant d'être confirmée à la main</b> : il faut que la personne affirme la chose fausse comme un fait, et non qu'elle la cite ou la dénonce. Pour aider au tri, Beau Discours repère les tournures de citation (« je cite », « selon M. X », « comme l'a dit », guillemets), identifie la personne citée et cherche son propos d'origine dans tout ce qui a été collecté. Ce ne sont que des indices : la décision reste manuelle. Une même phrase republiée le même jour compte une fois.</p>
@@ -1601,7 +1911,8 @@ function vueMethode(v) {
     </ul>
     <h2>Limites des taux</h2>
     <ul>
-      <li>Les fact-checkers vérifient surtout les propos douteux et les figures les plus exposées. Un taux de faux décrit les propos <b>vérifiés</b>, pas tout ce que dit une personne ou un parti.</li>
+      <li>La couverture dépend des comptes collectés : un compte X peu visité par l'extension compte moins de posts analysés.</li>
+      <li>Les fact-checkers vérifient surtout les propos douteux et les figures les plus exposées. Un taux de faux tiré de leurs verdicts décrit les propos <b>vérifiés</b>, pas tout ce que dit une personne ou un parti.</li>
       <li>En dessous de ${SEUIL} propos vérifiés, un taux est grisé : il ne veut rien dire.</li>
       <li>Deux taux par parti : tous propos confondus, et moyenne par personnalité (une figure très vérifiée ne pèse pas plus qu'une autre).</li>
       <li>Les partis ne sont pas classés entre eux.</li>
@@ -1609,11 +1920,12 @@ function vueMethode(v) {
     <h2>Faits et opinions</h2>
     <p>Quatre sources : les prises de parole en séance publique à l'Assemblée (comptes rendus officiels ; présidence de séance et interruptions exclues), les posts sur les réseaux sociaux, les citations reprises dans les titres de presse, et les propos saisis à la main.</p>
     <p>Chaque propos est découpé en phrases. Une phrase avec un jugement, une volonté ou une injonction (« il faut », « je regrette », « scandaleux ») est une <b>opinion</b>. Une affirmation sans ces marques est un <b>fait énoncé</b>, vrai ou faux : trancher revient aux fact-checkers. Les questions et les formules de procédure (« Avis défavorable », « La parole est à… ») ne comptent ni comme fait ni comme opinion.</p>
-    <p>Ce tri repose sur des indices lexicaux, sans IA : il se trompe phrase par phrase, mais applique la même règle à tous les partis, ce qui rend la comparaison possible. Sur les propos saisis, un clic sur une phrase change son classement.</p>
+    <p>Ce tri en faits et opinions repose sur des indices lexicaux, sans IA : il se trompe phrase par phrase, mais applique la même règle à tous les partis, ce qui rend la comparaison possible. Sur les propos saisis, un clic sur une phrase change son classement.</p>
     <h2>Thèmes</h2>
     <p>Une vingtaine de thèmes (budget, santé, sécurité, immigration, écologie…) repérés par mots-clés : dans le titre du débat et le texte pour les séances, dans le texte des posts et dans les titres de presse. Le classement montre la part de chaque thème dans l'ensemble des mentions.</p>
     <h2>Réseaux sociaux</h2>
     <p>Collectés automatiquement : Bluesky, Mastodon, YouTube (titres et descriptions) et les canaux Telegram publics, depuis les comptes déclarés dans Wikidata (Bluesky : à défaut, compte au nom exact avec au moins 500 abonnés). <b>X et Instagram</b> : relevés par l'extension de navigateur « Beau Discours - relevé », qui lit les profils affichés (posts, nombre d'abonnés), au fil de la navigation ou en tournée des profils. La couverture X dépend donc du nombre de profils visités ; la date du dernier relevé est indiquée sur chaque fiche. Facebook et TikTok ne sont pas collectés.</p>
+    <p>Les posts qui ne sont pas des prises de parole ne sont ni comptés ni analysés : agenda et annonces de passages dans les médias (« ce soir à 20 h sur France 2 »), appels à suivre, partager ou adhérer, remerciements, vœux et hommages brefs. Les posts dont le texte a été affiché traduit par le navigateur ou par X sont aussi écartés : seuls comptent les mots réellement publiés.</p>
     <h2>Portée</h2>
     <p>Nombre d'abonnés par réseau : relevé du jour pour Bluesky, Mastodon et Telegram (et YouTube avec une clé Google) ; pour X et YouTube sans clé, dernier chiffre publié dans Wikidata, avec sa date. Pour un parti, les abonnés des membres sont additionnés : c'est un ordre de grandeur de l'audience, pas un nombre de personnes distinctes.</p>
     <h2>Presse</h2>
@@ -1625,7 +1937,7 @@ function vueMethode(v) {
     <h2>Propos sanctionnés</h2>
     <p>Un propos n'est marqué « sanctionné » qu'avec une source : rappel à l'ordre ou censure à l'Assemblée, condamnation définitive. Pas de jugement moral.</p>
     <h2>Sources</h2>
-    <p>Open data de l'Assemblée nationale (députés, comptes rendus de séance), Wikidata (parcours, partis successifs, formation, photo), HATVP (liens vers les déclarations), API Google Fact Check, flux RSS des Décodeurs, de CheckNews, de franceinfo et de 20 Minutes.</p>
+    <p>Open data de l'Assemblée nationale (députés, comptes rendus de séance), Wikidata (parcours, partis successifs, formation, photo), HATVP (liens vers les déclarations), Eurostat (chiffres officiels), Arcom (temps de parole), articles de presse et pages web trouvés par Bing Actualités et Bing, Wikipédia, API Google Fact Check, flux RSS des Décodeurs, de CheckNews, de franceinfo et de 20 Minutes. Analyse des posts : modèle de langage ouvert Qwen3, exécuté localement avec Ollama.</p>
   </div>`;
 }
 
