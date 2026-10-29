@@ -73,6 +73,12 @@ async function charger() {
   S.d = await api('/api/donnees');
   S.pers = Object.fromEntries(S.d.personnes.map(p => [p.id, p]));
   S.partis = Object.fromEntries(S.d.partis.map(p => [p.id, p]));
+  // Médias des intervenants (journalistes, éditorialistes) et groupes propriétaires : traités comme des partis.
+  Object.assign(S.partis, S.d.redactions || {});
+  S.groupesMedias = Object.fromEntries((S.d.groupes_medias || []).map(g => [g.id, g]));
+  for (const g of S.d.groupes_medias || []) S.partis[g.id] = { ...g, sigle: g.nom };
+  const navMedias = $('[data-nav="medias"]');
+  if (navMedias) navMedias.hidden = !(S.d.groupes_medias || []).length;  // onglet masqué tant que personne n'est retenu
   const pastille = $('#nb-atelier');
   if (pastille) {
     const n = S.d.a_qualifier.length + S.d.registre_a_confirmer + S.d.registre_signalements;
@@ -102,6 +108,10 @@ const propos = () => ['tout', 'saisis'].includes(S.source) ? S.d.propos.filter(p
 const lignesPhrases = () => S.d.phrases.filter(l => dansMois(l[1]) && (S.source === 'tout' || S.source === l[7]));
 
 // Propos non fiables : faux, trompeurs ou non étayés.
+const estMedia = id => S.pers[id]?.categorie === 'media';
+const estCollectifMedia = id => /^[mg]-/.test(id || '');
+// Ensemble des identifiants regroupés : un groupe propriétaire rassemble ses rédactions.
+const membresDe = id => S.groupesMedias?.[id]?.medias || [id];
 const nonFiables = c => c.faux + c.trompeur + (c.non_etaye || 0);
 
 function compter(vs) {
@@ -323,19 +333,22 @@ function colonnesMois(vs) {
 const VUES = {
   accueil: vueAccueil, affirmations: vueAffirmationsPub, affirmation: vueAffirmationPub,
   personnalites: vuePersonnalites, p: vuePersonne, partis: vuePartis, parti: vueParti,
+  medias: vueMedias, media: vueParti,
   methode: vueMethode, atelier: vueAtelier, mentions: vueMentions,
 };
 // Onglet de navigation allumé pour chaque vue.
 const NAV = { accueil: 'accueil', affirmations: 'affirmations', affirmation: 'affirmations', personnalites: 'personnalites',
-  p: 'personnalites', partis: 'partis', parti: 'partis', methode: 'methode', atelier: 'atelier' };
+  p: 'personnalites', partis: 'partis', parti: 'partis', medias: 'medias', media: 'medias', methode: 'methode', atelier: 'atelier' };
 
 function route() {
+  if (S.aRecharger && !location.hash.startsWith('#/atelier/intervenants')) { S.aRecharger = false; recharger(); return; }
   const [chemin, requete] = location.hash.replace(/^#\/?/, '').split('?');
   const parts = chemin.split('/').map(decodeURIComponent);
   const vue = VUES[parts[0]] && !(STATIQUE && parts[0] === 'atelier') ? parts[0] : 'accueil';
   S.requete = new URLSearchParams(requete || '');
-  document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('actif', a.dataset.nav === NAV[vue]));
-  document.body.dataset.onglet = NAV[vue];
+  const nav = vue === 'p' && S.d && estMedia(parts[1]) ? 'medias' : NAV[vue];
+  document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('actif', a.dataset.nav === nav));
+  document.body.dataset.onglet = nav;
   const v = $('#vue');
   if (!S.d) { v.innerHTML = '<p class="vide-etat">Chargement…</p>'; return; }
   VUES[vue](v, parts[1] || '', parts[2] || '');
@@ -378,10 +391,11 @@ function brancherFiltres(v) {
 }
 
 function statsParti(id, vs, ps, ls) {
-  const membres = S.d.personnes.filter(p => p.parti === id);
-  const vp = vs.filter(v => v.parti === id);
-  const pp = ps.filter(p => p.parti === id);
-  return { membres, vp, c: compter(vp), m: moyenneParPersonne(vp), f: compterPhrases(pp, ls.filter(l => l[2] === id)) };
+  const ens = membresDe(id);
+  const membres = S.d.personnes.filter(p => ens.includes(p.parti));
+  const vp = vs.filter(v => ens.includes(v.parti));
+  const pp = ps.filter(p => ens.includes(p.parti));
+  return { membres, vp, c: compter(vp), m: moyenneParPersonne(vp), f: compterPhrases(pp, ls.filter(l => ens.includes(l[2]))) };
 }
 
 function vuePartis(v) {
@@ -420,9 +434,9 @@ function vuePartis(v) {
 
 function carteParti({ p, membres, c, f, md, pr, ab, fx }) {
   const peu = c.n < SEUIL;
-  return `<a class="carte parti" href="#/parti/${p.id}">
+  return `<a class="carte parti" href="#/${estCollectifMedia(p.id) ? 'media' : 'parti'}/${p.id}">
     <span class="liseré" style="background:${p.couleur}"></span>
-    <div class="titre"><h2>${esc(p.nom)}</h2><span class="sigle">${esc(p.sigle)}</span><span class="compte">${membres.length} pers.</span></div>
+    <div class="titre"><h2>${esc(p.nom)}</h2>${p.sigle !== p.nom ? `<span class="sigle">${esc(p.sigle)}</span>` : ''}<span class="compte">${membres.length} pers.</span></div>
     <div class="chiffres">
       <div class="chiffre"><b>${c.n}</b><span>propos vérifiés</span></div>
       <div class="chiffre ${peu ? 'insuffisant' : ''}"><b>${c.n ? pct(nonFiables(c), c.n) + ' %' : '–'}</b><span>non fiables</span></div>
@@ -466,33 +480,35 @@ function vueParti(v, id) {
   if (!p) return vuePartis(v);
   const vs = verdicts(), ps = propos(), ls = lignesPhrases();
   const { membres, vp, c, m, f } = statsParti(id, vs, ps, ls);
+  const ens = membresDe(id), media = estCollectifMedia(id);
   const idsMembres = membres.map(x => x.id);
   const presences = idsMembres.map(i => [i, presenceDe(i)]).filter(x => x[1]);
   const med = presenceMediane();
   const suivis = idsMembres.filter(i => S.d.reseaux[i]?.collectes.length).length;
-  const ids = new Set([...membres.map(x => x.id), ...vp.map(x => x.personne), ...ls.filter(l => l[2] === id).map(l => l[0])]);
+  const ids = new Set([...membres.map(x => x.id), ...vp.map(x => x.personne), ...ls.filter(l => ens.includes(l[2])).map(l => l[0])]);
   const lignes = [...ids].map(i => S.pers[i]).map(pe => {
     const mine = vp.filter(x => x.personne === pe.id);
-    return { pe, c: compter(mine), fx: faussetesDe(l => l[0] === pe.id && l[5] === id).n, ab: abonnesDe([pe.id]).total, pres: presenceDe(pe.id), md: mediasDe([pe.id]).total, f: compterPhrases(ps.filter(x => x.personne === pe.id && x.parti === id), ls.filter(l => l[0] === pe.id && l[2] === id)), ancien: pe.parti !== id };
+    return { pe, c: compter(mine), fx: faussetesDe(l => l[0] === pe.id && ens.includes(l[5])).n, ab: abonnesDe([pe.id]).total, pres: presenceDe(pe.id), md: mediasDe([pe.id]).total, f: compterPhrases(ps.filter(x => x.personne === pe.id && ens.includes(x.parti)), ls.filter(l => l[0] === pe.id && ens.includes(l[2]))), ancien: !ens.includes(pe.parti) };
   }).sort((a, b) => b.fx - a.fx || b.c.n - a.c.n || b.ab - a.ab || a.pe.nom_famille.localeCompare(b.pe.nom_famille));
   const peu = c.n < SEUIL;
-  const fx = faussetesDe(l => l[5] === id);
+  const fx = faussetesDe(l => ens.includes(l[5]));
   const abP = abonnesDe(idsMembres).total;
+  const groupe = media && S.groupesMedias[p.groupe];
   const solMed = mediane(presences.map(x => x[1].sol));
   v.innerHTML = `
     <div class="entete">
-      <div><div class="muet petit"><a href="#/partis">Partis</a></div>
-        <h1><span class="badge" style="font-size:15px;vertical-align:4px"><i style="background:${p.couleur}"></i>${esc(p.sigle)}</span> ${esc(p.nom)}</h1>
-        <div class="muet petit">${membres.length} personnalités suivies · ${c.n} propos vérifiés</div></div>
+      <div><div class="muet petit">${media ? `<a href="#/medias">Médias</a>${groupe ? ` · <a href="#/media/${groupe.id}">${esc(groupe.nom)}</a>` : ''}` : '<a href="#/partis">Partis</a>'}</div>
+        <h1>${media ? '' : `<span class="badge" style="font-size:15px;vertical-align:4px"><i style="background:${p.couleur}"></i>${esc(p.sigle)}</span> `}${esc(p.nom)}</h1>
+        <div class="muet petit">${membres.length} ${media ? 'intervenants suivis' : 'personnalités suivies'} · ${c.n} propos vérifiés${S.groupesMedias[id] ? ` · ${ens.length} rédaction${ens.length > 1 ? 's' : ''}` : ''}${p.source ? ` · <a href="${esc(p.source)}" target="_blank" rel="noopener">propriétaire : source</a>` : ''}</div></div>
       <div class="filtres">${filtresPeriode()}${filtresSource()}</div>
     </div>
     ${indicateurs([
       { val: fx.n ? `${fx.affirmations.length} · ${fx.n} fois` : '0', lib: 'affirmations mensongères répétées', choc: fx.n > 0 },
       { val: c.n ? `${pct(nonFiables(c), c.n)} %` : '–', lib: c.n < SEUIL ? `non fiables (${c.n} vérifiés, trop peu)` : 'des propos vérifiés non fiables' },
       { val: abP ? nbCourt(abP) : '–', lib: 'abonnés cumulés' },
-      { val: solMed != null ? pct(solMed, 1) + ' %' : '–', lib: 'votes solennels (médiane des députés)' },
+      media ? { val: f.n ? pct(f.opinion, f.n) + ' %' : '–', lib: "d'opinions dans leurs propos" } : { val: solMed != null ? pct(solMed, 1) + ' %' : '–', lib: 'votes solennels (médiane des députés)' },
     ])}
-    ${ongletsPage('ongletParti', [['fiabilite', 'Fiabilité'], ['membres', 'Membres'], ['medias', 'Médias et présence'], ['themes', 'Thèmes']])}
+    ${ongletsPage('ongletParti', [['fiabilite', 'Fiabilité'], ['membres', media ? 'Intervenants' : 'Membres'], ['medias', media ? 'Portée' : 'Médias et présence'], ['themes', 'Thèmes']])}
     <section data-section="fiabilite">
       <div class="carte" style="margin-bottom:14px"><h3>Affirmations mensongères répétées</h3>${blocFaussetes(fx, true)}</div>
       <div class="carte" style="margin-bottom:14px">
@@ -530,11 +546,12 @@ function vueParti(v, id) {
         <td class="n">${l.md ? heures(l.md) : ''}</td></tr>`).join('')}</tbody></table></div>
     </section>
     <section data-section="medias">
-      <div class="deux">
+      ${media ? `<div class="carte"><h3>Portée sur les réseaux</h3>${blocPortee(idsMembres)}</div>` : ''}
+      <div class="deux" ${media ? 'hidden' : ''}>
         <div class="carte"><h3>Médias</h3>${blocMedias(idsMembres)}</div>
         <div class="carte"><h3>Portée sur les réseaux</h3>${blocPortee(idsMembres)}</div>
       </div>
-      <div class="deux">
+      <div class="deux" ${media ? 'hidden' : ''}>
         <div class="carte"><h3>Présence à l'Assemblée</h3>${presences.length ? `
           <div class="chiffres" style="margin:10px 0">
             <div class="chiffre"><b>${pct(solMed, 1)} %</b><span>votes solennels (médiane)</span></div>
@@ -566,7 +583,7 @@ function detailPhrases(f) {
 
 function badgeParti(id, suffixe = '') {
   const p = S.partis[id] || S.partis.autres;
-  return `<a class="badge" href="#/parti/${p.id}"><i style="background:${p.couleur}"></i>${esc(p.nom)}${suffixe}</a>`;
+  return `<a class="badge" href="#/${estCollectifMedia(p.id) ? 'media' : 'parti'}/${p.id}"><i style="background:${p.couleur}"></i>${esc(p.nom)}${suffixe}</a>`;
 }
 function initiales(p) { return (p.prenom[0] || '') + (p.nom_famille[0] || ''); }
 
@@ -597,7 +614,8 @@ function vuePersonne(v, id) {
   };
   const a = age(p.naissance?.date);
   const cv = p.cv || { mandats: [], partis: [], formation: [], professions: [] };
-  const groupe = p.groupe && p.groupe.sigle !== S.partis[p.parti]?.sigle ? ` · groupe ${esc(p.groupe.sigle)}` : '';
+  const groupe = p.categorie === 'media' ? (S.partis[S.partis[p.parti]?.groupe] ? ` · propriétaire : <a href="#/media/${S.partis[p.parti].groupe}">${esc(S.partis[S.partis[p.parti].groupe].nom)}</a>` : '')
+    : p.groupe && p.groupe.sigle !== S.partis[p.parti]?.sigle ? ` · groupe ${esc(p.groupe.sigle)}` : '';
   const liens = [
     p.an && `<a href="${p.an}" target="_blank" rel="noopener">Assemblée nationale</a>`,
     p.hatvp && `<a href="${p.hatvp}" target="_blank" rel="noopener">Déclarations HATVP</a>`,
@@ -615,7 +633,7 @@ function vuePersonne(v, id) {
           p.naissance?.date && `Né${p.femme ? 'e' : p.femme === false ? '' : '·e'} le ${fdate(p.naissance.date)}${p.naissance.lieu ? ' à ' + esc(p.naissance.lieu) : ''}${a ? ` (${a} ans)` : ''}`,
           p.profession && `Profession déclarée : ${esc(p.profession)}`,
         ].filter(Boolean).join(' · ')}</div>
-        <div class="liens">${liens}</div>
+        <div class="liens">${liens}${p.categorie === 'media' && !STATIQUE ? `<a class="edition" href="#/atelier/intervenants?q=${encodeURIComponent(p.nom)}&qid=${p.wikidata}">Modifier le média</a>` : ''}</div>
       </div>
     </div>
     <div class="filtres" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${filtresPeriode()}${filtresSource()}</div>
@@ -1104,7 +1122,7 @@ async function vueAffirmationsPub(v) {
 function vuePersonnalites(v) {
   const q = S.requete;
   const filtre = { texte: q.get('q') || '', parti: q.get('parti') || '', type: q.get('type') || '', tri: q.get('tri') || 'mensonges' };
-  const lignes = surTout(() => S.d.personnes.map(p => ({
+  const lignes = surTout(() => S.d.personnes.filter(p => p.categorie !== 'media').map(p => ({
     p, fx: faussetesDe(l => l[0] === p.id).n, ab: abonnesDe([p.id]).total, tv: mediasDe([p.id]).total,
     pres: presenceDe(p.id), c: compter(S.d.verdicts.filter(x => x.personne === p.id)),
   })));
@@ -1146,10 +1164,134 @@ function vuePersonnalites(v) {
   v.querySelectorAll('tr[data-href]').forEach(tr => tr.onclick = () => location.hash = tr.dataset.href);
 }
 
+// ---------- Médias : groupes propriétaires, rédactions, intervenants ----------
+function vueMedias(v) {
+  const vs = verdicts(), ps = propos(), ls = lignesPhrases();
+  const stats = id => {
+    const x = { p: S.partis[id], ...statsParti(id, vs, ps, ls) };
+    const ids = x.membres.map(m => m.id);
+    x.md = { total: 0 }; x.pr = presseDe(ids); x.ab = abonnesDe(ids).total;
+    x.fx = faussetesDe(l => membresDe(id).includes(l[5]));
+    return x;
+  };
+  const groupes = S.d.groupes_medias || [];
+  const n = S.d.personnes.filter(p => p.categorie === 'media').length;
+  v.innerHTML = `
+    <div class="entete">
+      <div><h1>Médias</h1><div class="muet petit">${n} journalistes, éditorialistes et chroniqueurs suivis · par groupe propriétaire et par rédaction</div></div>
+      <div class="filtres">${filtresPeriode()}${filtresSource()}</div>
+    </div>
+    <div class="rangee" style="margin-bottom:14px">${legende(VERDICTS)}</div>
+    ${!groupes.length ? '<p class="vide-etat">Aucun intervenant retenu pour l\'instant.</p>' : groupes.map(g => {
+      const x = stats(g.id);
+      return `<section class="groupe-media">
+        <div class="rangee" style="justify-content:space-between;align-items:baseline">
+          <h2><a href="#/media/${g.id}"><span class="badge"><i style="background:${g.couleur}"></i>${esc(g.nom)}</span></a></h2>
+          <span class="muet petit">${x.membres.length} intervenant${x.membres.length > 1 ? 's' : ''} · ${x.c.n} propos vérifiés${x.c.n ? ` · ${pct(nonFiables(x.c), x.c.n)} % non fiables` : ''}${x.ab ? ` · ${nbCourt(x.ab)} abonnés` : ''}</span>
+        </div>
+        <div class="grille">${g.medias.map(m => carteParti(stats(m))).join('')}</div>
+      </section>`;
+    }).join('')}
+    <p class="mention">Le média retenu est celui où l'intervenant s'exprime principalement aujourd'hui ; le propriétaire est celui qui contrôle le média (sources en lien sur chaque groupe). Les statistiques des médias ne sont jamais mêlées à celles des partis.</p>`;
+  brancherFiltres(v);
+}
+
+async function vueIntervenants(v) {
+  v.innerHTML = '<p class="vide-etat">Chargement…</p>';
+  const d = await api('/api/intervenants');
+  const etat = S.triInter = S.triInter || { vue: Object.values(d.tri).some(t => t.statut === 'propose') ? 'propose' : '', q: '', politique: true, page: 0 };
+  if (S.requete.get('q')) Object.assign(etat, { q: S.requete.get('q'), vue: d.tri[S.requete.get('qid')]?.statut ?? etat.vue, page: 0 });
+  const etapes = t => t.parcours || [{ media: t.media, depuis: null }];
+  const parcoursHtml = t => {
+    const e = etapes(t);
+    return `<div class="petit">Média : <b>${esc(e.at(-1).media || 'non renseigné')}</b>${e.at(-1).depuis ? ` depuis le ${fdate(e.at(-1).depuis)}` : ''}${e.length > 1 ? ` · avant : ${e.slice(0, -1).reverse().map(x => `${esc(x.media || 'non renseigné')}${x.depuis ? ` (depuis le ${fdate(x.depuis)})` : ''}`).join(', ')}` : ''}</div>`;
+  };
+  const statut = c => d.tri[c.wikidata]?.statut || '';
+  const suggere = c => (c.employeurs.find(e => !e.fin && e.nom) || {}).nom || '';
+  const rendre = () => {
+    const liste = d.candidats.filter(c => statut(c) === etat.vue && (!etat.politique || etat.vue || c.politique)
+      && (!etat.q || norm(c.nom).includes(norm(etat.q))));
+    const page = liste.slice(etat.page * 40, etat.page * 40 + 40);
+    const nb = s => d.candidats.filter(c => statut(c) === s).length;
+    v.innerHTML = `
+      <p class="muet petit">Pré-liste Wikidata (${d.candidats.length} personnes, mise à jour du ${fdate((d.maj || '').slice(0, 10))}) : journalistes, chroniqueurs, animateurs et essayistes ayant un compte X ou Bluesky. Seuls les intervenants retenus sont suivis et publiés. Indique le média où chacun s'exprime aujourd'hui : Wikidata n'en propose qu'une piste, souvent datée.</p>
+      <div class="rangee" style="margin:10px 0">
+        <div class="segments" id="iv-vue">${[['propose', 'Proposés', nb('propose')], ['', 'À trier', nb('')], ['garde', 'Retenus', nb('garde')], ['ecarte', 'Écartés', nb('ecarte')]].filter(([k, , x]) => k !== 'propose' || x).map(([k, n, x]) => `<button data-val="${k}" class="${etat.vue === k ? 'actif' : ''}">${n} (${x})</button>`).join('')}</div>
+        <input id="iv-q" type="search" placeholder="Nom" value="${esc(etat.q)}" style="max-width:220px">
+        ${etat.vue ? '' : `<label class="petit"><input type="checkbox" id="iv-pol" ${etat.politique ? 'checked' : ''}> profil politique d'abord (éditorialistes, chroniqueurs, polémistes…)</label>`}
+      </div>
+      <form id="iv-ajout" class="rangee" style="margin:0 0 12px">
+        <input name="nom" placeholder="Ajouter : nom ou QID Wikidata" required style="max-width:240px">
+        <input name="media" list="iv-medias" placeholder="Média principal" style="max-width:180px">
+        <input name="x" placeholder="Compte X (si absent de Wikidata)" style="max-width:220px">
+        <button>Ajouter</button><span id="iv-ajout-msg" class="petit"></span>
+      </form>
+      <datalist id="iv-medias">${d.medias.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+      <div class="carte">${page.map(c => `
+        <div class="iv-ligne" data-q="${c.wikidata}">
+          ${c.image ? `<img src="${esc(c.image)}" alt="" loading="lazy">` : `<span class="ini">${esc(c.nom.split(' ').map(x => x[0]).join('').slice(0, 2))}</span>`}
+          <div class="iv-texte"><b>${esc(c.nom)}</b> <span class="muet petit">${c.suivis ? nbCourt(c.suivis) + ' abonnés' : ''}</span>
+            <div class="muet petit">${esc(c.description || '')} · ${esc(c.professions.join(', '))}</div>
+            ${statut(c) === 'garde' ? parcoursHtml(d.tri[c.wikidata]) : ''}
+            ${d.tri[c.wikidata]?.note ? `<div class="petit${d.tri[c.wikidata].note.startsWith('à vérifier') ? ' rouge' : ''}">${esc(d.tri[c.wikidata].note)}</div>` : ''}
+            <div class="muet petit">${c.employeurs.length ? 'Wikidata : ' + c.employeurs.slice(0, 4).map(e => esc(e.nom) + (e.fin ? ` (jusqu'en ${e.fin.slice(0, 4)})` : '')).join(', ') : ''}
+              ${c.wikipedia ? ` · <a href="${esc(c.wikipedia)}" target="_blank" rel="noopener">Wikipédia</a>` : ''}</div></div>
+          <input class="iv-media" list="iv-medias" placeholder="Média principal" value="${esc(statut(c) === 'garde' ? d.tri[c.wikidata].media || '' : d.tri[c.wikidata]?.media || suggere(c))}">
+          ${statut(c) === 'garde' ? `<label class="petit iv-date">depuis le <input type="date" class="iv-depuis"></label>` : ''}
+          <div class="iv-boutons">
+            ${statut(c) !== 'garde' ? '<button data-s="garde" class="principal">Retenir</button><button data-s="garde" data-sans="1">Retenir sans média</button>' : ''}
+            ${statut(c) === 'garde' ? '<button data-maj="1" class="principal" title="Avec une date : changement de média, l’ancien reste dans son parcours. Sans date : correction du média actuel.">Enregistrer le média</button>' : ''}
+            ${statut(c) !== 'ecarte' ? '<button data-s="ecarte">Écarter</button>' : ''}
+            ${statut(c) && statut(c) !== 'propose' ? '<button data-s="">Remettre à trier</button>' : ''}
+          </div>
+        </div>`).join('') || '<p class="muet">Rien ici.</p>'}</div>
+      <div class="rangee" style="margin-top:10px">
+        ${etat.page ? '<button id="iv-prec">Précédents</button>' : ''}
+        <span class="muet petit">${liste.length ? `${etat.page * 40 + 1}–${etat.page * 40 + page.length} sur ${liste.length}` : ''}</span>
+        ${(etat.page + 1) * 40 < liste.length ? '<button id="iv-suiv">Suivants</button>' : ''}
+      </div>`;
+    $('#iv-ajout', v).onsubmit = async e => {
+      e.preventDefault();
+      const f = e.target, msg = $('#iv-ajout-msg', v);
+      msg.textContent = 'Recherche dans Wikidata…';
+      const r = await api('/api/intervenants/ajouter', Object.fromEntries(new FormData(f)));
+      if (r.erreur) { msg.textContent = r.erreur; return; }
+      d.candidats = [r.candidat, ...d.candidats.filter(c => c.wikidata !== r.candidat.wikidata)];
+      if (d.tri[r.candidat.wikidata]?.statut !== 'garde') d.tri[r.candidat.wikidata] = { statut: 'propose', media: f.media.value, note: 'ajouté à la main' };
+      etat.vue = d.tri[r.candidat.wikidata].statut; etat.q = r.candidat.nom; etat.page = 0;
+      rendre();
+    };
+    v.querySelectorAll('#iv-vue button').forEach(b => b.onclick = () => { etat.vue = b.dataset.val; etat.page = 0; rendre(); });
+    $('#iv-q', v).onchange = e => { etat.q = e.target.value; etat.page = 0; rendre(); };
+    if ($('#iv-pol', v)) $('#iv-pol', v).onchange = e => { etat.politique = e.target.checked; etat.page = 0; rendre(); };
+    if ($('#iv-prec', v)) $('#iv-prec', v).onclick = () => { etat.page--; rendre(); };
+    if ($('#iv-suiv', v)) $('#iv-suiv', v).onclick = () => { etat.page++; rendre(); };
+    v.querySelectorAll('.iv-ligne').forEach(l => l.querySelectorAll('button[data-s]').forEach(b => b.onclick = async () => {
+      const media = b.dataset.sans ? '' : $('.iv-media', l).value.trim();
+      if (b.dataset.s === 'garde' && !media && !b.dataset.sans) { $('.iv-media', l).focus(); return; }
+      const r = await api('/api/intervenants/trier', { qid: l.dataset.q, statut: b.dataset.s, media });
+      if (b.dataset.s) d.tri[l.dataset.q] = r.tri; else delete d.tri[l.dataset.q];
+      l.remove();
+      S.aRecharger = true;
+    }));
+    // Retenus : le média évolue avec la carrière. Une date = changement (l'ancien média garde les
+    // propos d'avant) ; sans date = correction du média actuel.
+    v.querySelectorAll('.iv-ligne button[data-maj]').forEach(b => b.onclick = async () => {
+      const l = b.closest('.iv-ligne');
+      const r = await api('/api/intervenants/trier', { qid: l.dataset.q, statut: 'garde', media: $('.iv-media', l).value.trim(), changement: $('.iv-depuis', l).value });
+      if (r.erreur) { alert(r.erreur); return; }
+      d.tri[l.dataset.q] = r.tri;
+      S.aRecharger = true;
+      rendre();
+    });
+  };
+  rendre();
+}
+
 // ---------- Accueil : les chiffres qui frappent ----------
 function vueAccueil(v) {
   const st = surTout(() => {
-    const fx = S.d.faussetes;
+    const fx = S.d.faussetes.filter(l => !estMedia(l[0]));
     const auteurs = [...new Set(fx.map(l => l[0]))];
     const parPers = {};
     fx.forEach(l => { const x = parPers[l[0]] = parPers[l[0]] || { n: 0, apres: 0 }; x.n++; if (l[4]) x.apres++; });
@@ -1167,7 +1309,7 @@ function vueAccueil(v) {
       .map(([nom, sec]) => [index[norm(nom).replace(/-/g, ' ').split(' ').filter(Boolean).sort().join(' ')] || null, sec, nom]);
     const totalAntenne = dernier.reduce((s, m) => s + (S.d.medias_totaux[m] || 0), 0);
     const top10 = antenne.slice(0, 10).reduce((s, x) => s + x[1], 0);
-    const c = compter(S.d.verdicts);
+    const c = compter(S.d.verdicts.filter(x => !estMedia(x.personne)));
     const parlent = new Set(S.d.phrases.filter(l => l[7] === 'seance').map(l => l[0]));
     // Seulement les députés en fonction depuis au moins six mois : un suppléant arrivé le mois dernier n'a pas eu le temps.
     const sixMois = new Date(Date.now() - 182 * 864e5).toISOString().slice(0, 10);
@@ -1176,7 +1318,7 @@ function vueAccueil(v) {
     return {
       fx, auteurs, parPers, parAff, deputes, solMed, moitie, antenne, totalAntenne, top10, c, dernier, muets,
       apres: fx.filter(l => l[4]).length, porteeAuteurs: abonnesDe(auteurs).total,
-      semaineFx: fx.filter(l => l[2] >= semaine).length, semaineV: S.d.verdicts.filter(x => (x.date_verif || x.date) >= semaine).length,
+      semaineFx: fx.filter(l => l[2] >= semaine).length, semaineV: S.d.verdicts.filter(x => !estMedia(x.personne) && (x.date_verif || x.date) >= semaine).length,
     };
   });
   const pers = id => S.pers[id];
@@ -1241,6 +1383,7 @@ async function vueAtelier(v, sous, arg) {
       <a href="#/atelier" class="${!sous ? 'actif' : ''}">À trier${n ? ` (${n})` : ''}</a>
       <a href="#/atelier/verifier" class="${sous === 'verifier' ? 'actif' : ''}">À vérifier</a>
       <a href="#/atelier/registre" class="${sous === 'registre' ? 'actif' : ''}">Registre</a>
+      <a href="#/atelier/intervenants" class="${sous === 'intervenants' ? 'actif' : ''}">Intervenants médias</a>
       <a href="#/atelier/collectes" class="${sous === 'collectes' ? 'actif' : ''}">Collectes</a>
     </div>
     <div id="atelier"></div>`;
@@ -1248,6 +1391,7 @@ async function vueAtelier(v, sous, arg) {
   if (sous === 'registre') return vueRegistre(zone, arg);
   if (sous === 'verifier') return vueVerifier(zone);
   if (sous === 'collectes') return vueReglages(zone);
+  if (sous === 'intervenants') return vueIntervenants(zone);
   return vueATrier(zone);
 }
 
@@ -1446,6 +1590,9 @@ function vueMethode(v) {
       <li><b>opinion présentée comme un fait</b> : un jugement formulé comme une évidence (« X est le symbole de… »). Compté à part, il n'entre pas dans les verdicts.</li>
     </ul>
     <p>Faux, trompeurs et non étayés forment ensemble les <b>propos non fiables</b>.</p>
+    <h2>Intervenants des médias</h2>
+    <p>Journalistes, éditorialistes et chroniqueurs pèsent aussi sur le débat politique. Beau Discours en suit une sélection : une pré-liste est tirée de Wikidata (profession de média, compte X ou Bluesky, article Wikipédia), puis chaque intervenant est retenu ou écarté à la main, avec le média où il s'exprime principalement aujourd'hui. Leurs propos passent par les mêmes collectes et les mêmes vérifications que ceux des politiques.</p>
+    <p>Ils sont regroupés par <a href="#/medias">rédaction</a>, et les rédactions par <b>groupe propriétaire</b> (actionnaire de contrôle, source en lien sur chaque groupe). Leurs chiffres ne sont jamais mêlés à ceux des partis ni aux statistiques de l'accueil, qui portent sur les politiques. Un intervenant n'engage que lui-même : le chiffre d'une rédaction résume ses intervenants suivis, pas la ligne du média.</p>
     <h2>Rattachement au parti</h2>
     <ul>
       <li>Députés : parti de rattachement financier déclaré à l'Assemblée ; pour « Ensemble ! » et les non-rattachés, le groupe parlementaire.</li>

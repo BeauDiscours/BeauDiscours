@@ -326,6 +326,7 @@ body[data-onglet="accueil"] { --scene: #ffd23f; }
 body[data-onglet="affirmations"] { --scene: #ff6b5b; }
 body[data-onglet="personnalites"] { --scene: #5cc8ff; }
 body[data-onglet="partis"] { --scene: #c49bff; }
+body[data-onglet="medias"] { --scene: #ff7eb6; }
 body[data-onglet="methode"] { --scene: #6be3a9; }
 body[data-onglet="atelier"] { --scene: #ff9f43; }
 
@@ -391,3 +392,16 @@ tr.clic:hover td, .ligne-p:hover, .ligne-aff:hover { background: var(--surface-2
 .verif mark { background: color-mix(in srgb, var(--scene) 30%, transparent); color: var(--encre); }
 .piste-source { padding: 6px 0; border-bottom: 1px dashed var(--bord); }
 .choix-verdict button[data-verdict] { border-width: 1px; }
+
+/* Médias */
+.groupe-media { margin-bottom: 26px; }
+.groupe-media h2 { font-size: 18px; margin: 0 0 10px; }
+.groupe-media h2 a { color: inherit; text-decoration: none; }
+.iv-ligne { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--bord); flex-wrap: wrap; }
+.iv-ligne:last-child { border-bottom: 0; }
+.iv-ligne img, .iv-ligne .ini { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex: none; display: grid; place-items: center; background: var(--bord); font-weight: 600; }
+.iv-texte { flex: 1 1 280px; min-width: 0; }
+.iv-media { flex: 0 1 200px; min-width: 140px; }
+.iv-boutons { display: flex; gap: 6px; flex-wrap: wrap; }
+.iv-date { display: flex; gap: 6px; align-items: center; }
+.iv-date input { width: auto; }
