@@ -1207,7 +1207,7 @@ async function vueIntervenants(v) {
     return `<div class="petit">Média : <b>${esc(e.at(-1).media || 'non renseigné')}</b>${e.at(-1).depuis ? ` depuis le ${fdate(e.at(-1).depuis)}` : ''}${e.length > 1 ? ` · avant : ${e.slice(0, -1).reverse().map(x => `${esc(x.media || 'non renseigné')}${x.depuis ? ` (depuis le ${fdate(x.depuis)})` : ''}`).join(', ')}` : ''}</div>`;
   };
   const statut = c => d.tri[c.wikidata]?.statut || '';
-  const suggere = c => (c.employeurs.find(e => !e.fin && e.nom) || {}).nom || '';
+  const suggere = c => c.suggestion || '';  // seulement un média connu (pas une université)
   const rendre = () => {
     const liste = d.candidats.filter(c => statut(c) === etat.vue && (!etat.politique || etat.vue || c.politique)
       && (!etat.q || norm(c.nom).includes(norm(etat.q))));
